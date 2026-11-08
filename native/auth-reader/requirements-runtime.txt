@@ -1,0 +1,4 @@
+ccl_chromium_reader @ git+https://github.com/cclgroupltd/ccl_chromium_reader.git@ad37443541dd91dac3ac1fb2eecaeb8693f36815
+ccl_simplesnappy @ git+https://github.com/cclgroupltd/ccl_simplesnappy.git@3d085230baa8c46cf2090ebba29bf6e8eab31087
+Brotli==1.2.1
+zstd==1.5.7.2

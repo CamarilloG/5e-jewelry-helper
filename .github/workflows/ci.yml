@@ -1,0 +1,50 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.0
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.11.9
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run test:auth
+      - run: npm run build
+
+  package:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: check
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.0
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.11.9
+      - run: npm ci
+      - run: npm run build:auth
+      - run: npm run package:win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: |
+            release/*/*.exe
+            release/*/SHA256SUMS.txt
+            release/*/THIRD_PARTY_LICENSES.txt
