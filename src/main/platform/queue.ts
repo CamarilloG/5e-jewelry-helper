@@ -8,6 +8,7 @@ export enum Priority {
   USER = 2,
   MONITOR = 3,
   SCAN = 4,
+  BACKGROUND = 5,
 }
 
 export interface TaskOptions {
@@ -52,6 +53,7 @@ export class RequestQueue {
   private pausedReason: string | null = null;
   private blocked = new Set<Priority>();
   private listeners = new Set<() => void>();
+  private cancelListeners = new Set<(prefix: string) => void>();
 
   constructor(
     private limit: number,
@@ -122,6 +124,30 @@ export class RequestQueue {
       this.tasks = keep;
       this.emit();
     }
+    for (const listener of this.cancelListeners) {
+      listener(prefix);
+    }
+  }
+
+  upgradeGroupPriority(group: string, priority: Priority) {
+    let changed = false;
+    for (const task of this.tasks) {
+      if (task.options.group === group && priority < task.options.priority) {
+        task.options = { ...task.options, priority };
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.schedule();
+      this.emit();
+    }
+  }
+
+  onCancelGroup(listener: (prefix: string) => void): () => void {
+    this.cancelListeners.add(listener);
+    return () => {
+      this.cancelListeners.delete(listener);
+    };
   }
 
   /** 单次执行（不重试）。排队期间不计网络超时：fn 在真正发送时才被调用。 */

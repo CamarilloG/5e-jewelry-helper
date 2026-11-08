@@ -119,6 +119,37 @@ function ensureProfile(db: DatabaseSync, profileId: string, now: number): void {
   );
 }
 
+function mergeSummaryJsonStrings(
+  incomingJson: string | null | undefined,
+  existingJson: string | null | undefined,
+): string | null {
+  if (!incomingJson) return existingJson ?? null;
+  if (!existingJson) return incomingJson;
+  try {
+    const incoming = JSON.parse(incomingJson) as Record<string, unknown>;
+    const existing = JSON.parse(existingJson) as Record<string, unknown>;
+    const existingSource = existing.summarySource;
+    const incomingSource = incoming.summarySource ?? 'display';
+    if (
+      (existingSource === 'inventory' || existingSource === 'empty_inventory') &&
+      incomingSource === 'display'
+    ) {
+      return JSON.stringify({
+        ...incoming,
+        thumbnail: existing.thumbnail ?? null,
+        thumbnailSource: existing.thumbnailSource ?? null,
+        summaryVersion: 2,
+        gridItems: existing.gridItems ?? [],
+        summarySource: existingSource,
+        summaryUpdatedAt: existing.summaryUpdatedAt ?? null,
+      });
+    }
+    return incomingJson;
+  } catch {
+    return incomingJson;
+  }
+}
+
 function nextRevision(db: DatabaseSync, profileId: string, accountNo: string): number {
   const row = get<{ revision: number }>(
     db,
@@ -194,6 +225,14 @@ export const ops = {
   'profile.touch'(db: DatabaseSync, a: { profileId: string; now: number }) {
     ensureProfile(db, a.profileId, a.now);
     return true;
+  },
+
+  'profile.lastUsed'(db: DatabaseSync) {
+    const row = get<{ profile_id: string }>(
+      db,
+      'SELECT profile_id FROM profiles ORDER BY last_used_at DESC LIMIT 1',
+    );
+    return row?.profile_id ?? null;
   },
 
   'settings.get'(db: DatabaseSync, a: { scope: string; key: string }) {
@@ -348,11 +387,12 @@ export const ops = {
         const op = pending.get(item.accountNo);
         // 有未完成的目标状态 0 时以用户意图为准，不据平台快照改写
         if (!(op && op.target_status === 0)) {
+          const mergedSummary = mergeSummaryJsonStrings(item.summaryJson, row.summary_json);
           run(
             db,
             `UPDATE favorites SET platform_state = 'favorited', summary_json = COALESCE(?, summary_json)
              WHERE profile_id = ? AND account_no = ?`,
-            item.summaryJson,
+            mergedSummary,
             a.profileId,
             item.accountNo,
           );
@@ -407,10 +447,17 @@ export const ops = {
     db: DatabaseSync,
     a: { profileId: string; accountNo: string; summaryJson: string },
   ) {
+    const existing = get<{ summary_json: string | null }>(
+      db,
+      'SELECT summary_json FROM favorites WHERE profile_id = ? AND account_no = ?',
+      a.profileId,
+      a.accountNo,
+    );
+    const merged = mergeSummaryJsonStrings(a.summaryJson, existing?.summary_json) ?? a.summaryJson;
     run(
       db,
       'UPDATE favorites SET summary_json = ? WHERE profile_id = ? AND account_no = ?',
-      a.summaryJson,
+      merged,
       a.profileId,
       a.accountNo,
     );
@@ -455,6 +502,9 @@ export const ops = {
       }[];
     },
   ) {
+    const getExisting = db.prepare(
+      'SELECT summary_json FROM favorites WHERE profile_id = ? AND account_no = ?',
+    );
     const stmt = db.prepare(
       `UPDATE favorites SET trusted_status = ?, trusted_at = ?, display_status = ?, display_error = ?, checked_at = ?,
          expire_time_ms = ?, last_change_at = ?, last_change_from = ?, last_change_to = ?, cycle_id = ?, notified_cycle = ?,
@@ -462,6 +512,10 @@ export const ops = {
        WHERE profile_id = ? AND account_no = ?`,
     );
     for (const u of a.updates) {
+      const existing = getExisting.get(a.profileId, u.accountNo) as
+        | { summary_json: string | null }
+        | undefined;
+      const mergedSummary = mergeSummaryJsonStrings(u.summaryJson, existing?.summary_json);
       stmt.run(
         u.trustedStatus,
         u.trustedAt,
@@ -476,7 +530,7 @@ export const ops = {
         u.notifiedCycle,
         u.baselinePending,
         u.unseen,
-        u.summaryJson,
+        mergedSummary,
         a.profileId,
         u.accountNo,
       );
@@ -859,11 +913,36 @@ export const ops = {
     return { bytes: row?.t ?? 0, entries: row?.n ?? 0 };
   },
 
+  'inventory.allValid'(db: DatabaseSync, a: { now: number; schemaVersion: number }) {
+    return all<{ account_no: string; items_json: string; fetched_at: number; expires_at: number }>(
+      db,
+      'SELECT account_no, items_json, fetched_at, expires_at FROM inventory_cache WHERE schema_version = ? AND expires_at > ?',
+      a.schemaVersion,
+      a.now,
+    );
+  },
+
   /** 清除缓存：只清库存与账号快照缓存，不触碰收藏、预设和订单恢复记录。 */
   'cache.clear'(db: DatabaseSync) {
     run(db, 'DELETE FROM inventory_cache');
     run(db, 'DELETE FROM account_snapshots');
+    const clearedAt = Date.now();
+    run(
+      db,
+      `INSERT INTO settings (profile_id, key, value_json, updated_at) VALUES ('__device__', 'cache_cleared_at', ?, ?)
+       ON CONFLICT(profile_id, key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`,
+      JSON.stringify(clearedAt),
+      clearedAt,
+    );
     return true;
+  },
+
+  'cache.clearedAt'(db: DatabaseSync) {
+    const row = get<{ value_json: string; updated_at: number }>(
+      db,
+      "SELECT value_json, updated_at FROM settings WHERE profile_id = '__device__' AND key = 'cache_cleared_at'",
+    );
+    return row ? Number(JSON.parse(row.value_json)) || row.updated_at : 0;
   },
 
   // ----- 出码尝试 -----

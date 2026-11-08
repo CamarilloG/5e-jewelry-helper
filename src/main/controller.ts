@@ -32,6 +32,7 @@ import {
   DEVICE_SCOPE,
   type DeviceSettings,
   deviceSettingsSchema,
+  migrateDeviceSettings,
   type OrderPreset,
   type ProfileSettings,
   profileSettingsSchema,
@@ -101,6 +102,7 @@ export class AppController {
   readonly checkout: CheckoutService;
   private device: DeviceSettings = deviceSettingsSchema.parse({});
   private profileSettings: ProfileSettings | null = null;
+  private lastProfileId: string | null = null;
   private listeners = new Set<(event: MainEvent) => void>();
   private statusTimer: ReturnType<typeof setTimeout> | null = null;
   private contractBanner = false;
@@ -126,7 +128,7 @@ export class AppController {
     this.auth = new AuthService(
       deps.reader,
       {
-        confirmed: (profileId, previous) => void this.onConfirmed(profileId, previous),
+        confirmed: (profileId, previous) => this.onConfirmed(profileId, previous),
         lost: () => this.onAuthLost(),
       },
       logger,
@@ -146,15 +148,17 @@ export class AppController {
       deps.db,
       () => this.device.inventoryCacheTtl,
       this.now,
+      this.queue,
     );
     this.favorites = new FavoritesService(
       this.api,
       deps.db,
       this.accounts,
-      () => this.auth.profileId(),
+      () => this.effectiveProfileId(),
       () => this.emitFavorites(),
       logger,
       this.now,
+      this.queue,
     );
     this.scan = new ScanService(
       this.api,
@@ -166,6 +170,8 @@ export class AppController {
       },
       logger,
       this.now,
+      () => this.effectiveProfileId(),
+      () => this.auth.view().phase === 'OK',
     );
     this.notifications = new NotificationService(deps.db, deps.notifier, logger, this.now);
     this.monitor = new MonitorService({
@@ -204,7 +210,12 @@ export class AppController {
         this.emit({ type: 'checkout', payload: view });
         this.emitStatus();
       },
-      onBusyChange: (busy) => this.queue.setBlocked(Priority.SCAN, busy),
+      onBusyChange: (busy) => {
+        this.queue.setBlocked(Priority.SCAN, busy);
+        this.queue.setBlocked(Priority.BACKGROUND, busy);
+        if (busy) this.favorites.pauseBackfill();
+        else if (this.auth.view().phase === 'OK') this.favorites.resumeBackfill();
+      },
       logger,
       now: this.now,
       mono: deps.mono,
@@ -237,8 +248,14 @@ export class AppController {
     if (this.favoritesTimer) return;
     this.favoritesTimer = setTimeout(() => {
       this.favoritesTimer = null;
-      void this.favorites.view().then((payload) => this.emit({ type: 'favorites', payload }));
+      void this.favorites
+        .view({ triggerBackfill: false })
+        .then((payload) => this.emit({ type: 'favorites', payload }));
     }, 100);
+  }
+
+  effectiveProfileId(): string | null {
+    return this.auth.profileId() ?? this.lastProfileId;
   }
 
   navigate(target: NavigateTarget) {
@@ -260,10 +277,21 @@ export class AppController {
       this.emitStatus();
       return;
     }
+    this.lastProfileId = await this.deps.db.call('profile.lastUsed', undefined);
     const stored = await this.deps.db.call('settings.get', { scope: DEVICE_SCOPE, key: 'device' });
-    const parsed = deviceSettingsSchema.safeParse(stored ?? {});
-    this.device = parsed.success ? parsed.data : deviceSettingsSchema.parse({});
-    this.queue.setLimit(this.device.rateLimitPerMinute);
+    const migrated = migrateDeviceSettings(stored);
+    this.device = migrated.settings;
+    if (migrated.migrated) {
+      await this.deps.db.call('settings.set', {
+        scope: DEVICE_SCOPE,
+        key: 'device',
+        value: this.device,
+        now: this.now(),
+      });
+    }
+    if (stored != null || this.queue.getLimit() === 30) {
+      this.queue.setLimit(this.device.rateLimitPerMinute);
+    }
     this.auth.setDataDir(this.dataDir());
     await this.auth.reload();
     this.emitStatus();
@@ -276,22 +304,26 @@ export class AppController {
   }
 
   private async onConfirmed(profileId: string, previous: string | null) {
-    if (previous && previous !== profileId) {
+    const previousEffective = previous ?? this.lastProfileId;
+    if (previousEffective && previousEffective !== profileId) {
       // 用户身份变化：停止旧身份任务，切换数据作用域，保留旧身份订单记录
       this.monitor.halt();
       this.scan.reset();
       this.checkout.detach();
+      this.favorites.pauseBackfill();
       this.favorites.reset();
       this.accounts.forgetDetails();
       this.queue.cancelGroup('');
       this.deps.logger.info('auth.profile_switch', {});
     }
-    await this.deps.db.call('profile.touch', { profileId, now: this.now() });
+    this.lastProfileId = profileId;
+    void this.deps.db.call('profile.touch', { profileId, now: this.now() });
     const stored = await this.deps.db.call('settings.get', { scope: profileId, key: 'profile' });
     const parsed = profileSettingsSchema.safeParse(stored ?? {});
     this.profileSettings = parsed.success ? parsed.data : profileSettingsSchema.parse({});
     if (stored == null) this.profileSettings.monitorEnabled = this.device.autoStartMonitor;
     this.queue.resume();
+    this.favorites.resumeBackfill();
     // 优先处理未结束的订单记录，再启动收藏同步与监测
     await this.checkout.recover(profileId);
     this.monitor.start();
@@ -302,11 +334,13 @@ export class AppController {
   }
 
   private onAuthLost() {
+    this.favorites.pauseBackfill();
     this.queue.pause('登录态不可用');
     this.scan.interrupt('登录态失效，已暂停扫描');
     this.monitor.halt();
     this.queue.cancelGroup('monitor');
     this.queue.cancelGroup('favorites');
+    this.queue.cancelGroup('favorites:backfill');
     this.emitStatus();
     const pending = this.pendingActivations.splice(0);
     if (pending.length > 0) this.navigate({ page: 'FAVORITES' });
@@ -326,8 +360,10 @@ export class AppController {
 
   async shutdown() {
     await this.checkout.prepareQuit();
+    this.favorites.pauseBackfill();
     this.monitor.halt();
     this.scan.interrupt('退出');
+    this.queue.cancelGroup('favorites:backfill');
     this.queue.pause('退出');
   }
 
@@ -589,7 +625,7 @@ export class AppController {
   }
 
   async filterPresets(): Promise<FilterPresetView[]> {
-    const profileId = this.auth.profileId();
+    const profileId = this.effectiveProfileId();
     if (!profileId) return [];
     try {
       await this.deps.db.call('filters.seedBuiltin', {
@@ -777,7 +813,18 @@ export class AppController {
             now: this.now(),
           });
         }
-        return this.scan.start(input.conditions);
+        return this.scan.start(input.conditions, { forceRefresh: input.forceRefresh });
+      },
+      'scan.startLocal': async (input) => {
+        const profileId = this.effectiveProfileId();
+        if (input.presetId && profileId) {
+          await this.deps.db.call('filters.touch', {
+            profileId,
+            id: input.presetId,
+            now: this.now(),
+          });
+        }
+        return this.scan.startLocal(input.conditions);
       },
       'scan.stop': () => this.scan.stop(),
       'scan.continue': () => this.scan.continue(),
@@ -789,14 +836,16 @@ export class AppController {
           priority: Priority.USER,
           refresh: input.refresh,
         });
-        // 收藏的账号用完整库存中估价最高的饰品更新缩略图
-        const profileId = this.auth.profileId();
+        // 收藏的账号用完整库存更新 3×3 宫格摘要
+        const profileId = this.effectiveProfileId();
         const record = this.accounts.lastSeen(input.accountNo);
         if (profileId && record && (await this.favorites.localSet()).has(input.accountNo)) {
           await this.deps.db.call('favorites.updateSummary', {
             profileId,
             accountNo: input.accountNo,
-            summaryJson: JSON.stringify(summarize(record, inv.items)),
+            summaryJson: JSON.stringify(
+              summarize(record, inv.items, { source: 'inventory', updatedAt: this.now() }),
+            ),
           });
           this.emitFavorites();
         }
@@ -808,7 +857,7 @@ export class AppController {
         };
       },
       'account.quote': (input) => this.quote(input),
-      'favorites.state': () => this.favorites.view(),
+      'favorites.state': () => this.favorites.view({ triggerBackfill: true }),
       'favorites.add': async (input) => {
         this.requireProfile();
         const record = this.accounts.lastSeen(input.accountNo);
@@ -934,6 +983,7 @@ export class AppController {
       },
       'cache.clear': async () => {
         await this.accounts.clearCaches();
+        this.scan.clearCaches();
         await this.deps.images?.clear();
         this.toast('success', '缓存已清除（收藏、预设和订单记录不受影响）');
         return this.settingsView();
