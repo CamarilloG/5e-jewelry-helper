@@ -1,12 +1,9 @@
-// 饰品条件匹配：同一行由同一件饰品满足，行间账号级 AND，命中件数去重（业务流程 §3）。
-import { CATEGORY_BY_ID } from '../../shared/catalog';
+// 饰品条件匹配：同一行由同一件饰品满足（行内分类任一、皮肤任一），行间账号级 AND，
+// 命中件数去重（业务流程 §3、§8）。
+import { CATEGORY_BY_ID, GROUP_BY_ID } from '../../shared/catalog';
+import { conditionIsEmpty, type ItemCondition } from '../../shared/conditions';
 
-export interface ItemCondition {
-  /** 分类词典 id，空表示不限 */
-  categoryId: string | null;
-  /** 单个中文名称，空表示不限 */
-  name: string | null;
-}
+export { conditionIsEmpty, type ItemCondition };
 
 export interface MatchableItem {
   /** 同一库存内去重键（assetid，缺失时为平台 id） */
@@ -37,23 +34,30 @@ export function isStatTrak(marketName: string): boolean {
   return /stattrak/i.test(marketName.normalize('NFKC'));
 }
 
-export function conditionIsEmpty(condition: ItemCondition): boolean {
-  return !condition.categoryId && !(condition.name ?? '').trim();
+function categoryMatches(item: MatchableItem, id: string): boolean {
+  const entry = CATEGORY_BY_ID.get(id);
+  if (!entry) return false;
+  if (entry.kind === 'first') {
+    const group = GROUP_BY_ID.get(entry.groupId);
+    return !!group && normalizeText(item.firstType) === normalizeText(group.firstType);
+  }
+  const prefix = normalizeText(weaponPrefix(item.marketName));
+  return entry.names.some((n) => normalizeText(n) === prefix);
 }
 
 export function itemMatches(item: MatchableItem, condition: ItemCondition): boolean {
   if (conditionIsEmpty(condition)) return false;
-  if (condition.categoryId) {
-    const entry = CATEGORY_BY_ID.get(condition.categoryId);
-    if (!entry) return false;
-    if (entry.kind === 'first') {
-      if (normalizeText(item.firstType) !== normalizeText(entry.label)) return false;
-    } else if (normalizeText(weaponPrefix(item.marketName)) !== normalizeText(entry.label)) {
-      return false;
-    }
+  if (
+    condition.categoryIds.length > 0 &&
+    !condition.categoryIds.some((id) => categoryMatches(item, id))
+  ) {
+    return false;
   }
-  const name = (condition.name ?? '').trim();
-  if (name && !normalizeText(item.marketName).includes(normalizeText(name))) return false;
+  const names = condition.names.map((n) => normalizeText(n)).filter(Boolean);
+  if (names.length > 0) {
+    const market = normalizeText(item.marketName);
+    if (!names.some((n) => market.includes(n))) return false;
+  }
   return true;
 }
 
@@ -82,10 +86,20 @@ export function matchInventory(items: MatchableItem[], conditions: ItemCondition
   return { matched, score: matched ? hits.size : 0, hitKeys: matched ? [...hits] : [] };
 }
 
-/** 为条件选择单个平台搜索关键词：有名称优先名称，否则取分类映射词；无可用词返回 null。 */
-export function conditionKeyword(condition: ItemCondition): string | null {
-  const name = (condition.name ?? '').trim();
-  if (name) return name;
-  if (!condition.categoryId) return null;
-  return CATEGORY_BY_ID.get(condition.categoryId)?.keyword ?? null;
+/**
+ * 一行条件的平台搜索关键词集合：满足该行的任一饰品，名称至少包含其中一个词。
+ * 有皮肤名称时用皮肤名称；否则用各分类的关键词；任一分类没有关键词（大类）时返回 null，
+ * 该行不提供候选。
+ */
+export function conditionKeywords(condition: ItemCondition): string[] | null {
+  const names = condition.names.map((n) => n.trim()).filter(Boolean);
+  if (names.length > 0) return [...new Set(names)];
+  if (condition.categoryIds.length === 0) return null;
+  const words: string[] = [];
+  for (const id of condition.categoryIds) {
+    const keyword = CATEGORY_BY_ID.get(id)?.keyword;
+    if (!keyword) return null;
+    words.push(keyword);
+  }
+  return [...new Set(words)];
 }

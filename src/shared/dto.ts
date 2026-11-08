@@ -1,4 +1,5 @@
 // 主进程投影给界面的显示 DTO。界面只渲染这些结果，不复制计费、状态判定或调度规则。
+import type { ItemCondition } from './conditions';
 import type { RentKind } from './rent';
 import type { DeviceSettings, OrderPreset, ProfileSettings } from './settings';
 import type { AccountStatus } from './status';
@@ -138,7 +139,7 @@ export interface ScanView {
 }
 
 export interface FilterConditions {
-  items: { categoryId: string | null; name: string | null }[];
+  items: ItemCondition[];
   rentKind: RentKind;
   priceMin: string | null;
   priceMax: string | null;

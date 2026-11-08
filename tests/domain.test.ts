@@ -5,9 +5,12 @@ import {
   CouponListIncompleteError,
   chooseCoupon,
 } from '../src/main/domain/coupon';
-import { conditionKeyword, matchInventory, weaponPrefix } from '../src/main/domain/matching';
+import { conditionKeywords, matchInventory, weaponPrefix } from '../src/main/domain/matching';
 import { initialMonitorState, type MonitorState, observe } from '../src/main/domain/monitor';
 import { payVerdict } from '../src/main/domain/order-reasons';
+import { BUILTIN_FILTER_PRESETS } from '../src/shared/builtin-presets';
+import { CATEGORIES } from '../src/shared/catalog';
+import { cleanCondition, upgradeConditions, upgradeItemCondition } from '../src/shared/conditions';
 import { fenToDisplayYuan, originalFen } from '../src/shared/money';
 import {
   quantityOptions,
@@ -218,34 +221,139 @@ describe('饰品匹配', () => {
     item('4', 'M9 刺刀（★） | 多普勒 (崭新出厂)', '匕首'),
   ];
   it('同一行必须由同一件饰品满足', () => {
-    expect(matchInventory(inv, [{ categoryId: 'w:蝴蝶刀', name: '多普勒' }]).matched).toBe(true);
-    expect(matchInventory(inv, [{ categoryId: 'w:爪子刀', name: '多普勒' }]).matched).toBe(false);
+    expect(matchInventory(inv, [{ categoryIds: ['w:蝴蝶刀'], names: ['多普勒'] }]).matched).toBe(
+      true,
+    );
+    expect(matchInventory(inv, [{ categoryIds: ['w:爪子刀'], names: ['多普勒'] }]).matched).toBe(
+      false,
+    );
   });
   it('多行取交集，命中件数去重', () => {
     const r = matchInventory(inv, [
-      { categoryId: null, name: '多普勒' },
-      { categoryId: 'f:匕首', name: null },
+      { categoryIds: [], names: ['多普勒'] },
+      { categoryIds: ['f:匕首'], names: [] },
     ]);
     expect(r.matched).toBe(true);
     expect(r.score).toBe(3); // 多普勒×2 与 匕首×3 的并集去重为 3 件
     expect(
       matchInventory(inv, [
-        { categoryId: 'w:蝴蝶刀', name: null },
-        { categoryId: 'w:裹手', name: null },
+        { categoryIds: ['w:蝴蝶刀'], names: [] },
+        { categoryIds: ['w:裹手'], names: [] },
       ]).matched,
     ).toBe(false);
   });
   it('刺刀与 M9 刺刀精确区分；忽略空格全半角', () => {
-    expect(matchInventory(inv, [{ categoryId: 'w:刺刀', name: null }]).matched).toBe(false);
-    expect(matchInventory(inv, [{ categoryId: 'w:M9 刺刀', name: '多 普 勒' }]).matched).toBe(true);
+    expect(matchInventory(inv, [{ categoryIds: ['w:刺刀'], names: [] }]).matched).toBe(false);
+    expect(matchInventory(inv, [{ categoryIds: ['w:M9 刺刀'], names: ['多 普 勒'] }]).matched).toBe(
+      true,
+    );
     const wide = [item('9', 'Ｍ９　刺刀（★） | 多普勒 (崭新出厂)', '匕首')];
-    expect(matchInventory(wide, [{ categoryId: 'w:M9 刺刀', name: null }]).matched).toBe(true);
+    expect(matchInventory(wide, [{ categoryIds: ['w:M9 刺刀'], names: [] }]).matched).toBe(true);
     expect(weaponPrefix('FN57（StatTrak™） | 暴怒野兽 (破损不堪)')).toBe('FN57');
   });
-  it('关键词：有名称优先名称；大类无可靠关键词', () => {
-    expect(conditionKeyword({ categoryId: 'w:蝴蝶刀', name: '多普勒' })).toBe('多普勒');
-    expect(conditionKeyword({ categoryId: 'w:蝴蝶刀', name: null })).toBe('蝴蝶刀');
-    expect(conditionKeyword({ categoryId: 'f:手套', name: null })).toBeNull();
+  it('关键词：有皮肤优先皮肤；多选为并集；含大类时无可靠关键词', () => {
+    expect(conditionKeywords({ categoryIds: ['w:蝴蝶刀'], names: ['多普勒'] })).toEqual(['多普勒']);
+    expect(conditionKeywords({ categoryIds: ['w:蝴蝶刀'], names: [] })).toEqual(['蝴蝶刀']);
+    expect(conditionKeywords({ categoryIds: ['w:蝴蝶刀', 'w:M9 刺刀'], names: [] })).toEqual([
+      '蝴蝶刀',
+      'M9',
+    ]);
+    expect(conditionKeywords({ categoryIds: ['f:手套'], names: [] })).toBeNull();
+    expect(conditionKeywords({ categoryIds: ['w:蝴蝶刀', 'f:手套'], names: [] })).toBeNull();
+    expect(conditionKeywords({ categoryIds: ['f:手套'], names: ['潘多拉之盒'] })).toEqual([
+      '潘多拉之盒',
+    ]);
+  });
+
+  it('行内多选：任一类别、任一皮肤，且须同一件满足', () => {
+    const row = { categoryIds: ['w:爪子刀', 'w:M9 刺刀'], names: ['多普勒', '虎牙'] };
+    const r = matchInventory(inv, [row]);
+    expect(r.matched).toBe(true);
+    expect(r.hitKeys.sort()).toEqual(['2', '4']); // 爪子刀虎牙、M9 多普勒；蝴蝶刀多普勒不算
+    expect(
+      matchInventory(inv, [{ categoryIds: ['w:爪子刀', 'w:蝴蝶刀'], names: ['潘多拉之盒'] }])
+        .matched,
+    ).toBe(false);
+  });
+
+  it('大类按 firstType；大类与子类可混选', () => {
+    expect(matchInventory(inv, [{ categoryIds: ['f:手套'], names: [] }]).hitKeys).toEqual(['3']);
+    expect(
+      matchInventory(inv, [{ categoryIds: ['f:手套', 'w:蝴蝶刀'], names: [] }]).hitKeys.sort(),
+    ).toEqual(['1', '3']);
+  });
+
+  it('子类别名：M4A1 消音版/消音型、格洛克有无空格、USP 有无空格', () => {
+    const guns = [
+      item('a', 'M4A1消音版 | 印花集 (久经沙场)', '步枪'),
+      item('b', 'M4A1 消音型 | 氮化处理 (略有磨损)', '步枪'),
+      item('c', '格洛克18型（StatTrak™） | 水灵 (崭新出厂)', '手枪'),
+      item('d', 'USP消音版 | 枪响人亡 (久经沙场)', '手枪'),
+      item('e', 'M4A4 | 喧嚣杀戮 (久经沙场)', '步枪'),
+    ];
+    expect(
+      matchInventory(guns, [{ categoryIds: ['w:M4A1 消音版'], names: [] }]).hitKeys.sort(),
+    ).toEqual(['a', 'b']);
+    expect(matchInventory(guns, [{ categoryIds: ['w:格洛克 18 型'], names: [] }]).matched).toBe(
+      true,
+    );
+    expect(matchInventory(guns, [{ categoryIds: ['w:USP 消音版'], names: [] }]).matched).toBe(true);
+  });
+});
+
+describe('条件升级与内置方案', () => {
+  it('v1 方案（单分类+单名称）升级为 v2；旧 id 换算；无效 id 丢弃', () => {
+    expect(upgradeItemCondition({ categoryId: 'w:蝴蝶刀', name: '多普勒' })).toEqual({
+      categoryIds: ['w:蝴蝶刀'],
+      names: ['多普勒'],
+    });
+    expect(upgradeItemCondition({ categoryId: 'w:M4A1 消音型', name: null })).toEqual({
+      categoryIds: ['w:M4A1 消音版'],
+      names: [],
+    });
+    expect(upgradeItemCondition({ categoryId: 'w:不存在', name: null })).toEqual({
+      categoryIds: [],
+      names: [],
+    });
+    const c = upgradeConditions({
+      items: [
+        { categoryId: null, name: '多普勒' },
+        { categoryId: null, name: null },
+      ],
+      rentKind: 'DAY',
+      priceMin: '',
+      priceMax: '10',
+      couponOnly: true,
+    });
+    expect(c).toEqual({
+      items: [{ categoryIds: [], names: ['多普勒'] }],
+      rentKind: 'DAY',
+      priceMin: null,
+      priceMax: '10',
+      couponOnly: true,
+    });
+    expect(upgradeConditions({ items: [], rentKind: 'BAD' })).toBeNull();
+  });
+
+  it('选了整个大类时去掉同大类下的子类', () => {
+    expect(
+      cleanCondition({ categoryIds: ['w:运动手套', 'f:手套', 'w:蝴蝶刀'], names: [] }),
+    ).toEqual({ categoryIds: ['f:手套', 'w:蝴蝶刀'], names: [] });
+  });
+
+  it('内置方案的每个分类都在词典中，关键词不含空格', () => {
+    for (const p of BUILTIN_FILTER_PRESETS) {
+      for (const row of p.conditions.items) {
+        expect(cleanCondition(row)).toEqual(row);
+      }
+    }
+    for (const c of CATEGORIES) {
+      if (c.keyword) expect(c.keyword).not.toMatch(/\s/);
+      // 关键词必须是该子类所有写法的子串（可更宽，不能更窄）
+      for (const n of c.names) {
+        if (c.keyword) expect(n.replace(/\s+/g, '')).toContain(c.keyword);
+      }
+    }
   });
 });
 

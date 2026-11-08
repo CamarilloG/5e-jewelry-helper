@@ -649,6 +649,62 @@ export const ops = {
     return { ok: true as const, id: a.id };
   },
 
+  /** 写入尚未写入过的内置方案；同名已存在时跳过但记为已写入。返回新写入的个数。 */
+  'filters.seedBuiltin'(
+    db: DatabaseSync,
+    a: {
+      profileId: string;
+      presets: { key: string; id: string; name: string; conditionsJson: string }[];
+      schemaVersion: number;
+      now: number;
+    },
+  ) {
+    ensureProfile(db, a.profileId, a.now);
+    const key = 'builtinFilterPresets';
+    const row = get<{ value_json: string }>(
+      db,
+      'SELECT value_json FROM settings WHERE profile_id = ? AND key = ?',
+      a.profileId,
+      key,
+    );
+    const seeded = new Set<string>(row ? (JSON.parse(row.value_json) as string[]) : []);
+    let inserted = 0;
+    for (const p of a.presets) {
+      if (seeded.has(p.key)) continue;
+      seeded.add(p.key);
+      const clash = get<FilterPresetRow>(
+        db,
+        'SELECT * FROM filter_presets WHERE profile_id = ? AND name = ?',
+        a.profileId,
+        p.name,
+      );
+      if (clash) continue;
+      run(
+        db,
+        `INSERT INTO filter_presets (id, profile_id, name, conditions_json, schema_version, created_at, updated_at, last_used_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
+        p.id,
+        a.profileId,
+        p.name,
+        p.conditionsJson,
+        a.schemaVersion,
+        a.now,
+        a.now,
+      );
+      inserted++;
+    }
+    run(
+      db,
+      `INSERT INTO settings (profile_id, key, value_json, updated_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(profile_id, key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`,
+      a.profileId,
+      key,
+      JSON.stringify([...seeded]),
+      a.now,
+    );
+    return inserted;
+  },
+
   'filters.rename'(
     db: DatabaseSync,
     a: { profileId: string; id: string; name: string; now: number },
