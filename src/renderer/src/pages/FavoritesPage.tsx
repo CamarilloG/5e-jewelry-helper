@@ -1,6 +1,6 @@
 // P3 收藏监测：监测控制条、收藏行（3×3 饰品宫格、状态、预设、上次变化、单条监测开关、一键出码）、平台同步标记。
 import { MoreOutlined } from '@ant-design/icons';
-import { App, Button, Dropdown, Empty, Select, Space, Switch, Tag, Tooltip } from 'antd';
+import { App, Button, Dropdown, Empty, Select, Skeleton, Space, Switch, Tag, Tooltip } from 'antd';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FavoriteView, ItemView } from '../../../shared/dto';
 import { formatYuan } from '../../../shared/money';
@@ -166,7 +166,9 @@ export function FavoritesPage() {
           </span>
         </Space>
       </div>
-      {items.length === 0 ? (
+      {favorites == null ? (
+        <Skeleton active paragraph={{ rows: 6 }} />
+      ) : items.length === 0 ? (
         <div className="jh-empty">
           <Empty description="还没有收藏账号（平台收藏会自动同步进来）">
             <Button type="primary" onClick={() => useUi.getState().setPage('FILTER')}>
@@ -306,24 +308,7 @@ function FavoriteRow({
           <span>上次变化 {change}</span>
         </div>
         <div className="jh-fav-line jh-small">
-          {f.presetSummary ? (
-            <span>{f.presetSummary}</span>
-          ) : (
-            <span>
-              未设置预设 ·{' '}
-              <Button
-                size="small"
-                type="link"
-                onClick={() =>
-                  useUi.setState({
-                    presetEditor: { accountNo: f.accountNo, continueCheckout: false },
-                  })
-                }
-              >
-                去设置
-              </Button>
-            </span>
-          )}
+          <span>{f.presetSummary ?? '未设置预设'}</span>
         </div>
       </div>
       <div className="jh-fav-actions">
@@ -340,7 +325,15 @@ function FavoriteRow({
         </span>
         <Space size={4} wrap>
           <Tooltip
-            title={f.status !== 'AVAILABLE' ? '仅「可租」时可用' : busy ? '已有进行中的出码' : ''}
+            title={
+              f.status !== 'AVAILABLE'
+                ? '仅「可租」时可用'
+                : !authOk
+                  ? '登录态不可用，暂时无法出码'
+                  : busy
+                    ? '已有进行中的出码，点击可定位到该订单'
+                    : ''
+            }
           >
             <Button
               type="primary"

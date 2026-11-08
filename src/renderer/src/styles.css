@@ -100,6 +100,8 @@ body.jh-resizing {
   font-weight: 600;
 }
 .jh-nav-item:focus-visible,
+.jh-fav-grid:focus-visible,
+.jh-pending-head:focus-visible,
 .jh-seg:focus-visible,
 .jh-card:focus-visible,
 .jh-list-row:focus-visible,

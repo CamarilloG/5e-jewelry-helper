@@ -43,7 +43,7 @@ import {
 import { formatYuan } from '../../../shared/money';
 import { RENT_KINDS, RENT_META } from '../../../shared/rent';
 import { call } from '../api';
-import { ItemCard, StatusBadge, VirtualGrid } from '../components/common';
+import { activateOnKey, ItemCard, StatusBadge, VirtualGrid } from '../components/common';
 import { FavoriteStar, useFavoriteSet } from '../components/favorite-actions';
 import { formatTime } from '../format';
 import {
@@ -130,9 +130,19 @@ function ConditionPanel() {
   const { message } = App.useApp();
   const [presets, setPresets] = useState<FilterPresetView[]>([]);
   const [saving, setSaving] = useState(false);
+  const [presetsFailed, setPresetsFailed] = useState(false);
   useEffect(() => {
     void presetsVersion;
-    call('filters.list').then(setPresets, () => setPresets([]));
+    call('filters.list').then(
+      (list) => {
+        setPresets(list);
+        setPresetsFailed(false);
+      },
+      () => {
+        setPresets([]);
+        setPresetsFailed(true);
+      },
+    );
   }, [presetsVersion]);
   const modified =
     form.presetId != null && form.presetSnapshot !== JSON.stringify(formToConditions(form));
@@ -193,7 +203,7 @@ function ConditionPanel() {
           }
           options={presets.map((p) => ({ label: p.name, value: p.id }))}
           onChange={applyPreset}
-          notFoundContent="还没有常用方案"
+          notFoundContent={presetsFailed ? '方案加载失败，请稍后重试' : '还没有常用方案'}
           aria-label="选择常用方案"
         />
       </div>
@@ -846,9 +856,7 @@ function ResultCard({ result }: { result: ScanResultView }) {
       tabIndex={0}
       aria-label={`账号 ${a.accountNo}`}
       onClick={() => openDrawer(result)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') openDrawer(result);
-      }}
+      onKeyDown={activateOnKey(() => openDrawer(result))}
     >
       <div className="jh-card-head">
         <span className="jh-account">{a.accountNo}</span>
@@ -953,9 +961,7 @@ function ResultList({
               role="button"
               tabIndex={0}
               onClick={() => openDrawer(r)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') openDrawer(r);
-              }}
+              onKeyDown={activateOnKey(() => openDrawer(r))}
             >
               <FavoriteStar accountNo={r.account.accountNo} />
               <span className="jh-account">{r.account.accountNo}</span>

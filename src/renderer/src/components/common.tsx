@@ -2,6 +2,7 @@
 import { Tag, Tooltip } from 'antd';
 import {
   type CSSProperties,
+  type KeyboardEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -22,6 +23,24 @@ export const STATUS_COLOR: Record<AccountStatus, string> = {
   UNKNOWN: '#9CA3AF',
 };
 
+/** 状态文字色：描边和圆点沿用规范色，文字加深以保证可读性。 */
+const STATUS_TEXT_COLOR: Record<AccountStatus, string> = {
+  AVAILABLE: '#15803D',
+  RENTED: '#B45309',
+  OFF_SHELF: '#4B5563',
+  UNKNOWN: '#6B7280',
+};
+
+/** role="button" 容器的键盘激活：Enter/空格，且不响应内部控件冒泡上来的按键。 */
+export function activateOnKey(action: () => void) {
+  return (event: KeyboardEvent<HTMLElement>) => {
+    if (event.target !== event.currentTarget) return;
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    action();
+  };
+}
+
 export function StatusBadge({
   status,
   expireTimeMs,
@@ -36,8 +55,8 @@ export function StatusBadge({
   return (
     <span
       className={`jh-status jh-status-${status.toLowerCase()}`}
-      style={{ color, borderColor: color }}
-      role="status"
+      style={{ color: STATUS_TEXT_COLOR[status], borderColor: color }}
+      role="img"
       aria-label={`${STATUS_LABEL[status]}${extra}`}
     >
       <span

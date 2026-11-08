@@ -40,12 +40,31 @@ function previewBridge(): JewelryApi {
 const bridge: JewelryApi = window.jewelry ?? previewBridge();
 export const isPreview = !window.jewelry;
 
+const ipcErrors = new WeakSet<object>();
+
+/** 是否为主进程调用失败（未被页面处理时由全局统一提示）。 */
+export function isIpcError(error: unknown): error is Error {
+  return typeof error === 'object' && error !== null && ipcErrors.has(error);
+}
+
+function normalizeIpcError(error: unknown): Error {
+  // fetch 的网络失败是英文 TypeError，不直接展示给用户
+  const normalized =
+    error instanceof Error && !(error instanceof TypeError)
+      ? error
+      : new Error('无法连接本地服务，请重试');
+  ipcErrors.add(normalized);
+  return normalized;
+}
+
 export function call<C extends IpcChannel>(
   channel: C,
   ...input: IpcInput<C> extends undefined ? [] : [IpcInput<C>]
 ): Promise<IpcOutputs[C]> {
   const method = bridge.methods[channel] as (...args: unknown[]) => Promise<IpcOutputs[C]>;
-  return method(...input);
+  return method(...input).catch((error: unknown) => {
+    throw normalizeIpcError(error);
+  });
 }
 
 export function on<T extends MainEvent['type']>(
