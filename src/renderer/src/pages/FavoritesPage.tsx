@@ -1,7 +1,7 @@
 // P3 收藏监测：监测控制条、收藏行（3×3 饰品宫格、状态、预设、上次变化、单条监测开关、一键出码）、平台同步标记。
 import { MoreOutlined } from '@ant-design/icons';
 import { App, Button, Dropdown, Empty, Select, Skeleton, Space, Switch, Tag, Tooltip } from 'antd';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FavoriteView, ItemView } from '../../../shared/dto';
 import { formatYuan } from '../../../shared/money';
 import { STATUS_LABEL } from '../../../shared/status';
@@ -56,9 +56,7 @@ export function FavoritesPage() {
   const status = useUi((s) => s.status);
   const filter = useUi((s) => s.favoriteFilter);
   const focus = useUi((s) => s.favoriteFocus);
-  const { message } = App.useApp();
   const [sort, setSort] = useState<SortKey>('AVAILABLE_FIRST');
-  const now = useNow();
   const monitor = status?.monitor;
   const items = favorites?.items ?? [];
   const list = useMemo(() => {
@@ -69,7 +67,11 @@ export function FavoritesPage() {
       return STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || b.createdAt - a.createdAt;
     });
   }, [items, filter, sort]);
-  const rowRefs = useRef(new Map<string, HTMLDivElement>());
+  const rowRefs = useRef(new Map<string, HTMLElement>());
+  const registerRow = useCallback((accountNo: string, el: HTMLElement | null) => {
+    if (el) rowRefs.current.set(accountNo, el);
+    else rowRefs.current.delete(accountNo);
+  }, []);
   useEffect(() => {
     if (!focus) return;
     const el = rowRefs.current.get(focus);
@@ -77,7 +79,6 @@ export function FavoritesPage() {
     el?.focus();
   }, [focus]);
   const availableCount = items.filter((f) => f.status === 'AVAILABLE').length;
-  const cooldown = monitor?.cooldownUntil ? Math.max(0, monitor.cooldownUntil - now) : 0;
   const authOk = status?.auth.phase === 'OK';
   return (
     <div className="jh-page jh-favorites">
@@ -104,26 +105,8 @@ export function FavoritesPage() {
               修改
             </Button>
           </span>
-          <span className="jh-num">
-            {monitor?.running
-              ? '检查中…'
-              : monitor?.paused
-                ? '监测已暂停'
-                : monitor?.nextAt
-                  ? `下次 ${formatCountdown(monitor.nextAt - now)}`
-                  : '—'}
-          </span>
-          <Button
-            size="small"
-            disabled={!authOk || cooldown > 0}
-            onClick={() =>
-              void call('monitor.checkNow').then((r) => {
-                if (!r.started && r.cooldownUntil) message.info('冷却中，请稍后再试');
-              })
-            }
-          >
-            {cooldown > 0 ? `立即检查（${Math.ceil(cooldown / 1000)}s）` : '立即检查'}
-          </Button>
+          <MonitorCountdown />
+          <CheckNowButton disabled={!authOk} />
           {monitor?.lastRoundError ? (
             <Tag color="orange">最近一次检查：{monitor.lastRoundError}</Tag>
           ) : null}
@@ -183,16 +166,50 @@ export function FavoritesPage() {
               key={f.accountNo}
               favorite={f}
               focused={focus === f.accountNo}
-              refCallback={(el) => {
-                if (el) rowRefs.current.set(f.accountNo, el);
-                else rowRefs.current.delete(f.accountNo);
-              }}
+              register={registerRow}
             />
           ))}
           {list.length === 0 ? <Empty description="没有符合过滤条件的收藏" /> : null}
         </div>
       )}
     </div>
+  );
+}
+
+/** 倒计时只刷新自身，避免每秒重渲染整个收藏列表。 */
+function MonitorCountdown() {
+  const monitor = useUi((s) => s.status?.monitor);
+  const now = useNow();
+  return (
+    <span className="jh-num">
+      {monitor?.running
+        ? '检查中…'
+        : monitor?.paused
+          ? '监测已暂停'
+          : monitor?.nextAt
+            ? `下次 ${formatCountdown(monitor.nextAt - now)}`
+            : '—'}
+    </span>
+  );
+}
+
+function CheckNowButton({ disabled }: { disabled: boolean }) {
+  const cooldownUntil = useUi((s) => s.status?.monitor.cooldownUntil);
+  const { message } = App.useApp();
+  const now = useNow();
+  const cooldown = cooldownUntil ? Math.max(0, cooldownUntil - now) : 0;
+  return (
+    <Button
+      size="small"
+      disabled={disabled || cooldown > 0}
+      onClick={() =>
+        void call('monitor.checkNow').then((r) => {
+          if (!r.started && r.cooldownUntil) message.info('冷却中，请稍后再试');
+        })
+      }
+    >
+      {cooldown > 0 ? `立即检查（${Math.ceil(cooldown / 1000)}s）` : '立即检查'}
+    </Button>
   );
 }
 
@@ -252,14 +269,14 @@ export function FavoriteGrid({
   );
 }
 
-function FavoriteRow({
+const FavoriteRow = memo(function FavoriteRow({
   favorite: f,
   focused,
-  refCallback,
+  register,
 }: {
   favorite: FavoriteView;
   focused: boolean;
-  refCallback: (el: HTMLDivElement | null) => void;
+  register: (accountNo: string, el: HTMLElement | null) => void;
 }) {
   const { message } = App.useApp();
   const { remove } = useFavoriteActions();
@@ -275,7 +292,7 @@ function FavoriteRow({
     : '—';
   return (
     <article
-      ref={refCallback}
+      ref={(el) => register(f.accountNo, el)}
       tabIndex={-1}
       className={`jh-fav-row ${f.unseen ? 'jh-fav-new' : ''} ${focused ? 'jh-fav-focus' : ''}`}
       aria-label={`收藏 ${f.accountNo} ${STATUS_LABEL[f.status]}`}
@@ -383,4 +400,4 @@ function FavoriteRow({
       </div>
     </article>
   );
-}
+});

@@ -15,8 +15,8 @@ import {
 } from 'antd';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { inventoryCategoryKey, inventoryCategoryTabs } from '../../../shared/catalog';
-import type { DetailView, InventoryView } from '../../../shared/dto';
-import { compareDecimalText, formatYuan } from '../../../shared/money';
+import { comparePriceDesc, type DetailView, type InventoryView } from '../../../shared/dto';
+import { formatYuan } from '../../../shared/money';
 import { formatSlotWindow, formatWeekdays, RENT_META, SLOT_WINDOWS } from '../../../shared/rent';
 import { AGREEMENT_VERSION } from '../../../shared/settings';
 import { call } from '../api';
@@ -295,9 +295,9 @@ function Inventory({
       if (sort === 'RARITY')
         return (
           (b.rarityName ?? '').localeCompare(a.rarityName ?? '', 'zh-CN') ||
-          compareDecimalText(b.price, a.price)
+          comparePriceDesc(a.price, b.price)
         );
-      return compareDecimalText(b.price, a.price);
+      return comparePriceDesc(a.price, b.price);
     });
     if (hitKeys && mode === 'ALL')
       list.sort((a, b) => Number(hits.has(b.key)) - Number(hits.has(a.key)));

@@ -398,6 +398,15 @@ export function sortResultList(
  * A5（R05）：在默认“仅可租”视图下，将状态待确认（UNKNOWN 或离线历史 stale）的结果分入独立的
  * “已匹配，状态待确认”分组；状态确认后自动移入对应状态分组，“当前可租”只统计已确认可租项。
  */
+/** 按估价从高到低比较，估价缺失的排在最后。 */
+export function comparePriceDesc(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): number {
+  // 与 null 比较时有效估价得 -1、缺失得 0
+  return compareDecimalText(a, null) - compareDecimalText(b, null) || compareDecimalText(b, a);
+}
+
 /** 结果卡片/列表的饰品位：命中饰品优先，空位用补位候选按估价从高到低补齐。 */
 export function resultDisplayItems(
   hitItems: readonly ItemView[],
@@ -408,12 +417,7 @@ export function resultDisplayItems(
   const used = new Set(shown.map((item) => item.key));
   const fill = fillCandidates
     .filter((item) => !used.has(item.key))
-    .sort(
-      (a, b) =>
-        // 与 null 比较时有效估价得 -1、缺失得 0，保证缺失估价排在最后
-        compareDecimalText(a.price, null) - compareDecimalText(b.price, null) ||
-        compareDecimalText(b.price, a.price),
-    );
+    .sort((a, b) => comparePriceDesc(a.price, b.price));
   return [...shown, ...fill.slice(0, Math.max(0, limit - shown.length))];
 }
 

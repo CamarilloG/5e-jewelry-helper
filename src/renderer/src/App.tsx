@@ -290,7 +290,10 @@ function StatusBar() {
   return (
     <footer className="jh-statusbar">
       <button type="button" className="jh-seg" onClick={() => go('SETTINGS', 'auth')}>
-        <span className="jh-dot" style={{ background: authOk ? '#22C55E' : '#EF4444' }} />
+        <span
+          className="jh-dot"
+          style={{ background: authOk ? 'var(--jh-ok)' : 'var(--jh-risk)' }}
+        />
         {authOk
           ? `登录态正常${auth.daysLeft != null ? ` · 剩 ${auth.daysLeft} 天` : ''}`
           : auth.phase === 'NO_LOGIN' || auth.phase === 'NO_CLIENT'

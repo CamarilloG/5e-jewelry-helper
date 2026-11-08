@@ -11,6 +11,7 @@ if (root) {
     <StrictMode>
       <ConfigProvider
         locale={zhCN}
+        button={{ autoInsertSpace: false }}
         theme={{
           token: {
             colorPrimary: '#4F46E5',

@@ -492,6 +492,7 @@ function Results() {
   const status = useUi((s) => s.status);
   const settings = useUi((s) => s.settings);
   const setForm = useUi((s) => s.setForm);
+  const { message } = App.useApp();
   const hasItems = scan?.hasItemConditions ?? false;
   // A3（R04）：默认排序改为价格升序（PRICE_ASC）
   const [sort, setSort] = useState<SortKey>('PRICE_ASC');
@@ -595,12 +596,15 @@ function Results() {
       <div className="jh-results-body" ref={setScroller}>
         {phase === 'IDLE' ? (
           <div className="jh-empty">
-            <Empty description="设置条件后点击开始筛选，或使用本地匹配查看已缓存结果" />
+            <Empty description="设置条件后点击开始筛选，或使用本地匹配查看已缓存结果；下方示例可一键填入条件" />
             <Space wrap style={{ justifyContent: 'center' }}>
               {examples.map((ex) => (
                 <Button
                   key={ex.label}
-                  onClick={() => setForm(() => ({ ...emptyForm(), ...ex.form }))}
+                  onClick={() => {
+                    setForm(() => ({ ...emptyForm(), ...ex.form }));
+                    message.info('已填入条件，点击「开始筛选」查询');
+                  }}
                 >
                   {ex.label}
                 </Button>
@@ -693,6 +697,7 @@ function ScanHeader() {
   const waiting = status?.requests.waitingMs ?? 0;
   const paused = status?.requests.pausedReason;
   const count = scan.results.length;
+  const availableTotal = scan.results.filter((r) => r.account.status === 'AVAILABLE').length;
   const checkedCount = scan.checkedCount ?? scan.confirmed;
   const pendingCount = scan.pendingCount ?? Math.max(0, scan.candidates - scan.confirmed);
   const failedPageCount = scan.failedPages?.length ?? 0;
@@ -734,7 +739,8 @@ function ScanHeader() {
         </>
       ) : scan.phase === 'COMPLETE' ? (
         <span>
-          共 {count} 个符合条件的账号 · 完成于 {formatTime(scan.finishedAt)}
+          共 {count} 个符合条件的账号（其中可租 {availableTotal} 个）· 完成于{' '}
+          {formatTime(scan.finishedAt)}
           {scan.localOnly ? (
             <Tag color="blue" style={{ marginLeft: 8 }}>
               本地匹配
@@ -838,8 +844,8 @@ function openDrawer(result: ScanResultView, focusInventory = false) {
 }
 
 function ResultCard({ result }: { result: ScanResultView }) {
-  const scan = useUi((s) => s.scan);
-  const kind = scan?.conditions?.rentKind ?? 'HOUR';
+  const kind = useUi((s) => s.scan?.conditions?.rentKind ?? 'HOUR');
+  const hasItemConditions = useUi((s) => s.scan?.hasItemConditions ?? false);
   const a = result.account;
   const current = a.prices.find((p) => p.kind === kind);
   const others = a.prices.filter((p) => p.kind !== kind && p.supported);
@@ -878,7 +884,7 @@ function ResultCard({ result }: { result: ScanResultView }) {
           <ItemCard key={item.key} item={item} hit={hitKeys.has(item.key)} compact />
         ))}
       </div>
-      {scan?.hasItemConditions ? (
+      {hasItemConditions ? (
         <div className="jh-small">
           {isSearchEvidence ? '类别条件匹配，库存详情按需加载' : `命中 ${result.hitCount} 件`}
           {more > 0 ? (
