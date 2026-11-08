@@ -1,0 +1,729 @@
+{
+  "version": "1.0",
+  "verificationDate": "2026-11-07",
+  "scope": "选型与协议能力验证；不是完整产品验收",
+  "publicSources": [
+    {
+      "url": "https://jewelry.5eplaycdn.com/static/1.0.0/assets/js/index-CtKNIGbC-1793254264449.js",
+      "file": "index-CtKNIGbC-1793254264449.js",
+      "bytes": 1439077,
+      "sha256": "8f9025f4d79e637c8c194a32109c40795427354c2dbad65b5bb40227f782dff7"
+    }
+  ],
+  "apiCases": [
+    {
+      "case": "account-info",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "accountNo",
+        "authStatus",
+        "availableValue",
+        "dayActPrice",
+        "dayFirstPrice",
+        "dayPrice",
+        "eveningPrice",
+        "expireTime",
+        "hourActPrice",
+        "hourFirstPrice",
+        "hourPrice",
+        "isFavorited",
+        "isFirst",
+        "isSelf",
+        "morningPrice",
+        "noonPrice",
+        "platformCouponConfig",
+        "priceTypeDisplay",
+        "rentPeriod",
+        "rentStatus",
+        "rentType",
+        "shelfStatus",
+        "steam64Id",
+        "tags",
+        "useCoupon",
+        "value",
+        "vestAccountImage",
+        "vestAccountName",
+        "weekActPrice",
+        "weekFirstPrice",
+        "weekPrice",
+        "weekRangeEvening",
+        "weekRangeMorning",
+        "weekRangeNoon"
+      ],
+      "itemCount": null
+    },
+    {
+      "case": "auth-info",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "frontPageStatus",
+        "id",
+        "orderPageStatus"
+      ],
+      "itemCount": null
+    },
+    {
+      "case": "channels",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "items"
+      ],
+      "itemCount": 1
+    },
+    {
+      "case": "checkout-agreement",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "frontPageStatus",
+        "id",
+        "orderPageStatus"
+      ],
+      "itemCount": null
+    },
+    {
+      "case": "checkout-channels",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "items"
+      ],
+      "itemCount": 1
+    },
+    {
+      "case": "checkout-create",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "channelType",
+        "codeUrl",
+        "orderDateline",
+        "orderId",
+        "orderRemainSeconds"
+      ],
+      "itemCount": null
+    },
+    {
+      "case": "checkout-detail",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "accountNo",
+        "authStatus",
+        "availableValue",
+        "dayActPrice",
+        "dayFirstPrice",
+        "dayPrice",
+        "eveningPrice",
+        "expireTime",
+        "hourActPrice",
+        "hourFirstPrice",
+        "hourPrice",
+        "isFavorited",
+        "isFirst",
+        "isSelf",
+        "morningPrice",
+        "noonPrice",
+        "platformCouponConfig",
+        "priceTypeDisplay",
+        "rentPeriod",
+        "rentStatus",
+        "rentType",
+        "shelfStatus",
+        "steam64Id",
+        "tags",
+        "useCoupon",
+        "value",
+        "vestAccountImage",
+        "vestAccountName",
+        "weekActPrice",
+        "weekFirstPrice",
+        "weekPrice",
+        "weekRangeEvening",
+        "weekRangeMorning",
+        "weekRangeNoon"
+      ],
+      "itemCount": null
+    },
+    {
+      "case": "checkout-duration",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "accountNo",
+        "dayDuration",
+        "hourDuration",
+        "hourDurationRenewal",
+        "weekDuration"
+      ],
+      "itemCount": null
+    },
+    {
+      "case": "checkout-precheck",
+      "status": true,
+      "code": 0,
+      "dataKeys": [],
+      "itemCount": null
+    },
+    {
+      "case": "checkout-status",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "abnormalReason",
+        "payStatus"
+      ],
+      "itemCount": null
+    },
+    {
+      "case": "config",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "hourlyRental",
+        "rentType"
+      ],
+      "itemCount": null
+    },
+    {
+      "case": "contract-channels",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "items"
+      ],
+      "itemCount": 1
+    },
+    {
+      "case": "contract-detail-before",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "accountNo",
+        "authStatus",
+        "availableValue",
+        "dayActPrice",
+        "dayFirstPrice",
+        "dayPrice",
+        "eveningPrice",
+        "expireTime",
+        "hourActPrice",
+        "hourFirstPrice",
+        "hourPrice",
+        "isFavorited",
+        "isFirst",
+        "isSelf",
+        "morningPrice",
+        "noonPrice",
+        "platformCouponConfig",
+        "priceTypeDisplay",
+        "rentPeriod",
+        "rentStatus",
+        "rentType",
+        "shelfStatus",
+        "steam64Id",
+        "tags",
+        "useCoupon",
+        "value",
+        "vestAccountImage",
+        "vestAccountName",
+        "weekActPrice",
+        "weekFirstPrice",
+        "weekPrice",
+        "weekRangeEvening",
+        "weekRangeMorning",
+        "weekRangeNoon"
+      ],
+      "itemCount": null
+    },
+    {
+      "case": "contract-duration",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "accountNo",
+        "dayDuration",
+        "hourDuration",
+        "hourDurationRenewal",
+        "weekDuration"
+      ],
+      "itemCount": null
+    },
+    {
+      "case": "contract-orders",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "items",
+        "nextPageToken",
+        "totalSize"
+      ],
+      "itemCount": 6
+    },
+    {
+      "case": "contract-search",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "isFirst",
+        "list",
+        "total"
+      ],
+      "itemCount": 10
+    },
+    {
+      "case": "coupons",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "availableCount",
+        "items",
+        "nextPageToken",
+        "totalSize"
+      ],
+      "itemCount": 0
+    },
+    {
+      "case": "duration",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "accountNo",
+        "dayDuration",
+        "hourDuration",
+        "hourDurationRenewal",
+        "weekDuration"
+      ],
+      "itemCount": null
+    },
+    {
+      "case": "favorite-after-write",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "accountNo",
+        "authStatus",
+        "availableValue",
+        "dayActPrice",
+        "dayFirstPrice",
+        "dayPrice",
+        "eveningPrice",
+        "expireTime",
+        "hourActPrice",
+        "hourFirstPrice",
+        "hourPrice",
+        "isFavorited",
+        "isFirst",
+        "isSelf",
+        "morningPrice",
+        "noonPrice",
+        "platformCouponConfig",
+        "priceTypeDisplay",
+        "rentPeriod",
+        "rentStatus",
+        "rentType",
+        "shelfStatus",
+        "steam64Id",
+        "tags",
+        "useCoupon",
+        "value",
+        "vestAccountImage",
+        "vestAccountName",
+        "weekActPrice",
+        "weekFirstPrice",
+        "weekPrice",
+        "weekRangeEvening",
+        "weekRangeMorning",
+        "weekRangeNoon"
+      ],
+      "itemCount": null
+    },
+    {
+      "case": "favorite-repeat",
+      "status": true,
+      "code": 0,
+      "dataKeys": [],
+      "itemCount": null
+    },
+    {
+      "case": "favorite-restore",
+      "status": true,
+      "code": 0,
+      "dataKeys": [],
+      "itemCount": null
+    },
+    {
+      "case": "favorite-restored-state",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "accountNo",
+        "authStatus",
+        "availableValue",
+        "dayActPrice",
+        "dayFirstPrice",
+        "dayPrice",
+        "eveningPrice",
+        "expireTime",
+        "hourActPrice",
+        "hourFirstPrice",
+        "hourPrice",
+        "isFavorited",
+        "isFirst",
+        "isSelf",
+        "morningPrice",
+        "noonPrice",
+        "platformCouponConfig",
+        "priceTypeDisplay",
+        "rentPeriod",
+        "rentStatus",
+        "rentType",
+        "shelfStatus",
+        "steam64Id",
+        "tags",
+        "useCoupon",
+        "value",
+        "vestAccountImage",
+        "vestAccountName",
+        "weekActPrice",
+        "weekFirstPrice",
+        "weekPrice",
+        "weekRangeEvening",
+        "weekRangeMorning",
+        "weekRangeNoon"
+      ],
+      "itemCount": null
+    },
+    {
+      "case": "favorite-write",
+      "status": true,
+      "code": 0,
+      "dataKeys": [],
+      "itemCount": null
+    },
+    {
+      "case": "favorites-all",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "list",
+        "total"
+      ],
+      "itemCount": 10
+    },
+    {
+      "case": "favorites-page-1",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "list",
+        "total"
+      ],
+      "itemCount": 3
+    },
+    {
+      "case": "favorites-page-2",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "list",
+        "total"
+      ],
+      "itemCount": 3
+    },
+    {
+      "case": "favorites-rentable",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "list",
+        "total"
+      ],
+      "itemCount": 8
+    },
+    {
+      "case": "historical-order-status",
+      "status": false,
+      "code": 400,
+      "dataKeys": [],
+      "itemCount": null
+    },
+    {
+      "case": "inventory",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "list"
+      ],
+      "itemCount": 19
+    },
+    {
+      "case": "orders",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "items",
+        "nextPageToken",
+        "totalSize"
+      ],
+      "itemCount": 6
+    },
+    {
+      "case": "paid-order-details",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "items"
+      ],
+      "itemCount": 1
+    },
+    {
+      "case": "paid-orders-list",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "items",
+        "nextPageToken",
+        "totalSize"
+      ],
+      "itemCount": 7
+    },
+    {
+      "case": "search-rent-1",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "isFirst",
+        "list",
+        "total"
+      ],
+      "itemCount": 1
+    },
+    {
+      "case": "search-rent-2",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "isFirst",
+        "list",
+        "total"
+      ],
+      "itemCount": 1
+    },
+    {
+      "case": "search-rent-3",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "isFirst",
+        "list",
+        "total"
+      ],
+      "itemCount": 1
+    },
+    {
+      "case": "search-rent-4",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "isFirst",
+        "list",
+        "total"
+      ],
+      "itemCount": 1
+    },
+    {
+      "case": "search-rent-5",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "isFirst",
+        "list",
+        "total"
+      ],
+      "itemCount": 1
+    },
+    {
+      "case": "search-rent-6",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "isFirst",
+        "list",
+        "total"
+      ],
+      "itemCount": 1
+    },
+    {
+      "case": "search-size-10",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "isFirst",
+        "list",
+        "total"
+      ],
+      "itemCount": 10
+    },
+    {
+      "case": "search-size-100",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "isFirst",
+        "list",
+        "total"
+      ],
+      "itemCount": 100
+    },
+    {
+      "case": "user",
+      "status": true,
+      "code": 0,
+      "dataKeys": [
+        "avatarUrl",
+        "isBan",
+        "isCertify",
+        "isPlatformMaintenance",
+        "steamId",
+        "username",
+        "uuid"
+      ],
+      "itemCount": null
+    }
+  ],
+  "favoriteRestored": true,
+  "payment": {
+    "payStatus": 1,
+    "abnormalReason": 0
+  },
+  "orderVerification": {
+    "paidOrder": {
+      "sameIdentifier": false,
+      "childNoMatchesPaymentId": false,
+      "childNoMatchesRentalNo": true,
+      "totalRealAmountYuan": "0.2",
+      "durationSeconds": "7200",
+      "orderStatus": 1
+    },
+    "paymentDetailFields": [
+      "orderNo",
+      "orderChildNo",
+      "accountNo",
+      "totalTimeLength",
+      "buyTimeType",
+      "buyCount",
+      "orderAmount",
+      "discountAmount",
+      "realAmount",
+      "rentCount",
+      "propId",
+      "propTemplateId",
+      "propTemplateName",
+      "orderPayStatus",
+      "rentExpireTime",
+      "orderCreateTime",
+      "isRefund",
+      "logs"
+    ]
+  },
+  "ruleTests": {
+    "numTotalTests": 33,
+    "numPassedTests": 33,
+    "numFailedTests": 0,
+    "success": true
+  },
+  "desktopEvents": [
+    {
+      "time": "2026-11-07T22:13:40.916Z",
+      "event": "ready",
+      "electron": "45.2.3",
+      "node": "24.22.2",
+      "packaged": true,
+      "notificationSupported": true
+    },
+    {
+      "time": "2026-11-07T22:13:41.116Z",
+      "event": "renderer-isolation",
+      "node": "undefined",
+      "bridge": "object",
+      "onAction": "function"
+    },
+    {
+      "time": "2026-11-07T22:13:41.117Z",
+      "event": "sqlite",
+      "value": "中文数据",
+      "version": "3.53.4"
+    },
+    {
+      "time": "2026-11-07T22:13:41.136Z",
+      "event": "tray",
+      "destroyed": false
+    },
+    {
+      "time": "2026-11-07T22:13:41.144Z",
+      "event": "close-to-tray",
+      "visible": false,
+      "trayAlive": true
+    },
+    {
+      "time": "2026-11-07T22:13:41.213Z",
+      "event": "protocol-activation",
+      "action": "checkout"
+    },
+    {
+      "time": "2026-11-07T22:13:41.277Z",
+      "event": "memory",
+      "rss": 119091200
+    },
+    {
+      "time": "2026-11-07T22:13:41.300Z",
+      "event": "notification-show"
+    },
+    {
+      "time": "2026-11-07T22:14:06.242Z",
+      "event": "protocol-activation",
+      "action": "view"
+    },
+    {
+      "time": "2026-11-07T22:14:06.817Z",
+      "event": "native-activation",
+      "type": "action",
+      "actionIndex": 0
+    },
+    {
+      "time": "2026-11-07T22:14:06.818Z",
+      "event": "protocol-activation",
+      "action": "view"
+    },
+    {
+      "time": "2026-11-07T22:14:06.835Z",
+      "event": "native-activation",
+      "type": "action",
+      "actionIndex": 1
+    },
+    {
+      "time": "2026-11-07T22:14:06.836Z",
+      "event": "protocol-activation",
+      "action": "checkout"
+    }
+  ],
+  "frontend": {
+    "drawerOpened": true
+  },
+  "artifacts": [
+    {
+      "name": "auth-reader-check.exe",
+      "bytes": 9731756,
+      "sha256": "5522a27b1af035d26827081748ab8a8aca117348113223918964294bebe38d8e"
+    },
+    {
+      "name": "饰品助手验证 Setup 0.1.0.exe",
+      "bytes": 121196633,
+      "sha256": "91e9f5e31e29117cd294b068596687c10f9979c1fd8a9d1777253646a58daa3b"
+    }
+  ]
+}
