@@ -7,11 +7,12 @@ import {
   InputNumber,
   Radio,
   Select,
+  Skeleton,
   Space,
   Switch,
   Typography,
 } from 'antd';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { RENT_KINDS, RENT_META } from '../../../shared/rent';
 import {
   CACHE_TTL_LABEL,
@@ -45,7 +46,7 @@ export function SettingsPage() {
   const status = useUi((s) => s.status);
   const favorites = useUi((s) => s.favorites);
   const section = useUi((s) => s.settingsSection);
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const container = useRef<HTMLDivElement>(null);
   useEffect(() => {
     void call('settings.get').then((s) => useUi.setState({ settings: s }));
@@ -55,7 +56,13 @@ export function SettingsPage() {
     document.getElementById(`settings-${section}`)?.scrollIntoView({ block: 'start' });
     useUi.setState({ settingsSection: null });
   }, [section]);
-  if (!settings) return <div className="jh-page" />;
+  if (!settings) {
+    return (
+      <div className="jh-page">
+        <Skeleton active paragraph={{ rows: 8 }} />
+      </div>
+    );
+  }
   const d = settings.device;
   const update = async (patch: Partial<DeviceSettings> & { defaultPreset?: OrderPreset }) => {
     try {
@@ -70,15 +77,23 @@ export function SettingsPage() {
   const preset = settings.profile?.defaultPreset;
   return (
     <div className="jh-settings">
-      <Anchor
-        className="jh-settings-anchor"
-        getContainer={() => container.current ?? window}
-        items={SECTIONS.map((s) => ({ key: s.key, href: `#settings-${s.key}`, title: s.title }))}
-        onClick={(e, link) => {
-          e.preventDefault();
-          document.getElementById(link.href.slice(1))?.scrollIntoView({ block: 'start' });
-        }}
-      />
+      <nav className="jh-settings-nav" aria-label="设置分组">
+        <Anchor
+          affix={false}
+          bounds={24}
+          className="jh-settings-anchor"
+          getContainer={() => container.current ?? window}
+          items={SECTIONS.map((s) => ({
+            key: s.key,
+            href: `#settings-${s.key}`,
+            title: s.title,
+          }))}
+          onClick={(e, link) => {
+            e.preventDefault();
+            document.getElementById(link.href.slice(1))?.scrollIntoView({ block: 'start' });
+          }}
+        />
+      </nav>
       <div className="jh-settings-body" ref={container}>
         <Group id="auth" title="登录态">
           <Row label="当前状态">
@@ -120,16 +135,12 @@ export function SettingsPage() {
         </Group>
         <Group id="monitor" title="监测">
           <Row label="检查间隔（秒）">
-            <InputNumber
+            <CommitNumber
               min={MONITOR_MIN_SECONDS}
               max={86_400}
-              precision={0}
               value={d.monitorIntervalSeconds}
-              onChange={(v) => {
-                if (typeof v === 'number' && v >= MONITOR_MIN_SECONDS)
-                  void update({ monitorIntervalSeconds: v });
-              }}
-              aria-label="检查间隔"
+              onCommit={(v) => void update({ monitorIntervalSeconds: v })}
+              ariaLabel="检查间隔"
             />
             <span className="jh-hint">默认 60 秒，下限 30 秒；一轮结束后开始计时</span>
           </Row>
@@ -175,15 +186,12 @@ export function SettingsPage() {
                   <Radio value="FIXED">固定</Radio>
                 </Radio.Group>
                 {preset.quantity != null ? (
-                  <InputNumber
+                  <CommitNumber
                     min={1}
                     max={999}
-                    precision={0}
                     value={preset.quantity}
-                    onChange={(v) => {
-                      if (typeof v === 'number' && v >= 1)
-                        void update({ defaultPreset: { ...preset, quantity: v } });
-                    }}
+                    onCommit={(v) => void update({ defaultPreset: { ...preset, quantity: v } })}
+                    ariaLabel="固定数量"
                   />
                 ) : null}
               </Row>
@@ -247,15 +255,12 @@ export function SettingsPage() {
         </Group>
         <Group id="requests" title="请求与缓存">
           <Row label="请求速率上限（次/分钟）">
-            <InputNumber
+            <CommitNumber
               min={1}
               max={600}
-              precision={0}
               value={d.rateLimitPerMinute}
-              onChange={(v) => {
-                if (typeof v === 'number' && v >= 1) void update({ rateLimitPerMinute: v });
-              }}
-              aria-label="请求速率上限"
+              onCommit={(v) => void update({ rateLimitPerMinute: v })}
+              ariaLabel="请求速率上限"
             />
             {d.rateLimitPerMinute > DEFAULT_RATE_LIMIT ? (
               <span className="jh-warn-small">过高的请求频率可能被平台拦截或限制账号</span>
@@ -276,7 +281,19 @@ export function SettingsPage() {
             个账号）· 图片 {formatBytes(settings.cache.imageBytes)}
             <Button
               size="small"
-              onClick={() => void call('cache.clear').then((s) => useUi.setState({ settings: s }))}
+              onClick={() =>
+                modal.confirm({
+                  title: '清除本地缓存？',
+                  content: '将清除库存和图片缓存，不删除收藏、预设和订单恢复记录。',
+                  okText: '清除',
+                  okButtonProps: { danger: true },
+                  onOk: async () => {
+                    const next = await call('cache.clear');
+                    useUi.setState({ settings: next });
+                    message.success('缓存已清除');
+                  },
+                })
+              }
             >
               清除缓存
             </Button>
@@ -323,6 +340,43 @@ export function SettingsPage() {
         </Group>
       </div>
     </div>
+  );
+}
+
+/** 数字设置项：输入过程不保存，失焦或回车时才提交一次。 */
+function CommitNumber({
+  value,
+  min,
+  max,
+  onCommit,
+  ariaLabel,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  onCommit: (value: number) => void;
+  ariaLabel: string;
+}) {
+  const [draft, setDraft] = useState<number | null>(value);
+  useEffect(() => setDraft(value), [value]);
+  const commit = () => {
+    if (draft == null || draft < min || draft > max) {
+      setDraft(value);
+      return;
+    }
+    if (draft !== value) onCommit(draft);
+  };
+  return (
+    <InputNumber
+      min={min}
+      max={max}
+      precision={0}
+      value={draft}
+      onChange={(next) => setDraft(typeof next === 'number' ? next : null)}
+      onBlur={commit}
+      onPressEnter={commit}
+      aria-label={ariaLabel}
+    />
   );
 }
 

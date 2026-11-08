@@ -1,5 +1,11 @@
 // P1 筛选主页：条件面板（同件条件行、行间交集、租期价格、本地匹配）+ 可中断扫描进度 + 状态待确认折叠分组 + 卡片/列表结果。
-import { CloseOutlined, DownOutlined, PlusOutlined, RightOutlined } from '@ant-design/icons';
+import {
+  CloseOutlined,
+  DownOutlined,
+  InfoCircleOutlined,
+  PlusOutlined,
+  RightOutlined,
+} from '@ant-design/icons';
 import {
   App,
   Button,
@@ -28,6 +34,7 @@ import {
 import {
   type FilterPresetView,
   partitionResultsForFilter,
+  resultDisplayItems,
   type ScanResultView,
   type SortKey,
   type StatusFilter,
@@ -36,7 +43,7 @@ import {
 import { formatYuan } from '../../../shared/money';
 import { RENT_KINDS, RENT_META } from '../../../shared/rent';
 import { call } from '../api';
-import { ItemCard, StatusBadge, VirtualGrid } from '../components/common';
+import { activateOnKey, ItemCard, StatusBadge, VirtualGrid } from '../components/common';
 import { FavoriteStar, useFavoriteSet } from '../components/favorite-actions';
 import { formatTime } from '../format';
 import {
@@ -49,6 +56,11 @@ import {
 } from '../store';
 
 const PRICE_RE = /^\d{0,7}(\.\d{0,2})?$/;
+
+const CARD_ITEM_SLOTS = 4;
+const CARD_HEIGHT = 222;
+const CARD_HEIGHT_WITH_HITS = 244;
+const LIST_ITEM_SLOTS = 3;
 
 export { partitionResultsForFilter, type SortKey, type StatusFilter, sortResultList };
 
@@ -118,9 +130,19 @@ function ConditionPanel() {
   const { message } = App.useApp();
   const [presets, setPresets] = useState<FilterPresetView[]>([]);
   const [saving, setSaving] = useState(false);
+  const [presetsFailed, setPresetsFailed] = useState(false);
   useEffect(() => {
     void presetsVersion;
-    call('filters.list').then(setPresets, () => setPresets([]));
+    call('filters.list').then(
+      (list) => {
+        setPresets(list);
+        setPresetsFailed(false);
+      },
+      () => {
+        setPresets([]);
+        setPresetsFailed(true);
+      },
+    );
   }, [presetsVersion]);
   const modified =
     form.presetId != null && form.presetSnapshot !== JSON.stringify(formToConditions(form));
@@ -181,7 +203,7 @@ function ConditionPanel() {
           }
           options={presets.map((p) => ({ label: p.name, value: p.id }))}
           onChange={applyPreset}
-          notFoundContent="还没有常用方案"
+          notFoundContent={presetsFailed ? '方案加载失败，请稍后重试' : '还没有常用方案'}
           aria-label="选择常用方案"
         />
       </div>
@@ -321,7 +343,11 @@ function ConditionPanel() {
           onChange={(e) => setForm((f) => ({ ...f, priceMax: e.target.value.trim() }))}
         />
       </Space.Compact>
-      {priceInvalid(form) ? <div className="jh-error-text">价格下限不能大于上限</div> : null}
+      {!PRICE_RE.test(form.priceMin) || !PRICE_RE.test(form.priceMax) ? (
+        <div className="jh-error-text">价格只能填写数字，最多 2 位小数</div>
+      ) : priceInvalid(form) ? (
+        <div className="jh-error-text">价格下限不能大于上限</div>
+      ) : null}
       <Checkbox
         style={{ marginTop: 10 }}
         checked={form.couponOnly}
@@ -466,11 +492,13 @@ function Results() {
   const status = useUi((s) => s.status);
   const settings = useUi((s) => s.settings);
   const setForm = useUi((s) => s.setForm);
+  const { message } = App.useApp();
   const hasItems = scan?.hasItemConditions ?? false;
   // A3（R04）：默认排序改为价格升序（PRICE_ASC）
   const [sort, setSort] = useState<SortKey>('PRICE_ASC');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('AVAILABLE');
   const [pendingExpanded, setPendingExpanded] = useState(true);
+  const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
   const view = settings?.device.resultView ?? 'CARD';
 
   const rentKind = scan?.conditions?.rentKind ?? 'HOUR';
@@ -482,6 +510,7 @@ function Results() {
   const phase = scan?.phase ?? 'IDLE';
   const active = phase === 'CANDIDATES' || phase === 'VERIFYING';
   const totalVisible = mainResults.length + pendingResults.length;
+  const cardHeight = hasItems ? CARD_HEIGHT_WITH_HITS : CARD_HEIGHT;
 
   const examples: { label: string; form: Partial<FilterForm> }[] = [
     { label: '蝴蝶刀 + 多普勒', form: { rows: [newRow(['w:蝴蝶刀'], ['多普勒'])] } },
@@ -510,7 +539,7 @@ function Results() {
             <Select<SortKey>
               value={sort}
               onChange={setSort}
-              style={{ width: 132 }}
+              style={{ width: 108 }}
               aria-label="排序"
               options={[
                 { value: 'PRICE_ASC', label: '价格↑' },
@@ -523,7 +552,7 @@ function Results() {
             <Select<StatusFilter>
               value={statusFilter}
               onChange={setStatusFilter}
-              style={{ width: 120 }}
+              style={{ width: 96 }}
               aria-label="状态过滤"
               options={[
                 { value: 'AVAILABLE', label: '仅可租' },
@@ -558,21 +587,24 @@ function Results() {
             ) : (
               <>当前显示 {mainResults.length} 个</>
             )}
-          </span>
-          <span className="jh-scope">
-            本次搜索范围：平台候选 + 本地已知账号；不代表平台全部下架账号
+            <Tooltip title="本次搜索范围：平台候选 + 本地已知账号；不代表平台全部下架账号">
+              <InfoCircleOutlined className="jh-scope-icon" aria-label="搜索范围说明" />
+            </Tooltip>
           </span>
         </div>
       ) : null}
-      <div className="jh-results-body">
+      <div className="jh-results-body" ref={setScroller}>
         {phase === 'IDLE' ? (
           <div className="jh-empty">
-            <Empty description="设置条件后点击开始筛选，或使用本地匹配查看已缓存结果" />
+            <Empty description="设置条件后点击开始筛选，或使用本地匹配查看已缓存结果；下方示例可一键填入条件" />
             <Space wrap style={{ justifyContent: 'center' }}>
               {examples.map((ex) => (
                 <Button
                   key={ex.label}
-                  onClick={() => setForm(() => ({ ...emptyForm(), ...ex.form }))}
+                  onClick={() => {
+                    setForm(() => ({ ...emptyForm(), ...ex.form }));
+                    message.info('已填入条件，点击「开始筛选」查询');
+                  }}
                 >
                   {ex.label}
                 </Button>
@@ -599,12 +631,16 @@ function Results() {
                   </Space>
                 </button>
                 {pendingExpanded ? (
-                  <div className="jh-pending-grid">
-                    {pendingResults.map((r) => (
-                      <div key={r.account.accountNo} className="jh-pending-cell">
-                        <ResultCard result={r} />
-                      </div>
-                    ))}
+                  <div className="jh-pending-body">
+                    <VirtualGrid
+                      items={pendingResults}
+                      minColumnWidth={250}
+                      rowHeight={cardHeight}
+                      getKey={(r) => r.account.accountNo}
+                      ariaLabel="状态待确认结果"
+                      render={(r) => <ResultCard result={r} />}
+                      scrollParent={scroller}
+                    />
                   </div>
                 ) : null}
               </section>
@@ -633,13 +669,14 @@ function Results() {
               <VirtualGrid
                 items={mainResults}
                 minColumnWidth={250}
-                rowHeight={hasItems ? 300 : 236}
+                rowHeight={cardHeight}
                 getKey={(r) => r.account.accountNo}
                 ariaLabel="结果卡片"
                 render={(r) => <ResultCard result={r} />}
+                scrollParent={scroller}
               />
             ) : (
-              <ResultList results={mainResults} hasItems={hasItems} />
+              <ResultList results={mainResults} hasItems={hasItems} scrollParent={scroller} />
             )}
           </>
         )}
@@ -660,6 +697,7 @@ function ScanHeader() {
   const waiting = status?.requests.waitingMs ?? 0;
   const paused = status?.requests.pausedReason;
   const count = scan.results.length;
+  const availableTotal = scan.results.filter((r) => r.account.status === 'AVAILABLE').length;
   const checkedCount = scan.checkedCount ?? scan.confirmed;
   const pendingCount = scan.pendingCount ?? Math.max(0, scan.candidates - scan.confirmed);
   const failedPageCount = scan.failedPages?.length ?? 0;
@@ -701,7 +739,8 @@ function ScanHeader() {
         </>
       ) : scan.phase === 'COMPLETE' ? (
         <span>
-          共 {count} 个符合条件的账号 · 完成于 {formatTime(scan.finishedAt)}
+          共 {count} 个符合条件的账号（其中可租 {availableTotal} 个）· 完成于{' '}
+          {formatTime(scan.finishedAt)}
           {scan.localOnly ? (
             <Tag color="blue" style={{ marginLeft: 8 }}>
               本地匹配
@@ -789,6 +828,11 @@ function priceLine(result: ScanResultView, kind: (typeof RENT_KINDS)[number]) {
   return p?.price ? `${formatYuan(p.price, { compact: false })}/${RENT_META[kind].unit}` : '—';
 }
 
+/** 补位来源：优先完整库存选出的饰品，未读库存时退回平台展示位。 */
+function fillCandidates(result: ScanResultView) {
+  return result.fillItems?.length ? result.fillItems : result.account.displayItems;
+}
+
 function openDrawer(result: ScanResultView, focusInventory = false) {
   useUi.setState({
     drawer: {
@@ -800,13 +844,14 @@ function openDrawer(result: ScanResultView, focusInventory = false) {
 }
 
 function ResultCard({ result }: { result: ScanResultView }) {
-  const scan = useUi((s) => s.scan);
-  const kind = scan?.conditions?.rentKind ?? 'HOUR';
+  const kind = useUi((s) => s.scan?.conditions?.rentKind ?? 'HOUR');
+  const hasItemConditions = useUi((s) => s.scan?.hasItemConditions ?? false);
   const a = result.account;
   const current = a.prices.find((p) => p.kind === kind);
   const others = a.prices.filter((p) => p.kind !== kind && p.supported);
-  const shown = result.hitItems.length > 0 ? result.hitItems : a.displayItems.slice(0, 4);
-  const more = result.hitCount != null ? Math.max(0, result.hitCount - shown.length) : 0;
+  const shown = resultDisplayItems(result.hitItems, fillCandidates(result), CARD_ITEM_SLOTS);
+  const hitKeys = new Set(result.hitItems.map((i) => i.key));
+  const more = result.hitCount != null ? Math.max(0, result.hitCount - hitKeys.size) : 0;
   const isSearchEvidence = result.evidence === 'search' || result.hitCount === null;
 
   return (
@@ -817,9 +862,7 @@ function ResultCard({ result }: { result: ScanResultView }) {
       tabIndex={0}
       aria-label={`账号 ${a.accountNo}`}
       onClick={() => openDrawer(result)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') openDrawer(result);
-      }}
+      onKeyDown={activateOnKey(() => openDrawer(result))}
     >
       <div className="jh-card-head">
         <span className="jh-account">{a.accountNo}</span>
@@ -838,24 +881,24 @@ function ResultCard({ result }: { result: ScanResultView }) {
       </Tooltip>
       <div className="jh-card-items">
         {shown.map((item) => (
-          <ItemCard key={item.key} item={item} hit={result.hitItems.length > 0} compact />
+          <ItemCard key={item.key} item={item} hit={hitKeys.has(item.key)} compact />
         ))}
-        {more > 0 ? (
-          <Button
-            size="small"
-            type="link"
-            onClick={(e) => {
-              e.stopPropagation();
-              openDrawer(result, true);
-            }}
-          >
-            +{more}
-          </Button>
-        ) : null}
       </div>
-      {scan?.hasItemConditions ? (
+      {hasItemConditions ? (
         <div className="jh-small">
           {isSearchEvidence ? '类别条件匹配，库存详情按需加载' : `命中 ${result.hitCount} 件`}
+          {more > 0 ? (
+            <Button
+              size="small"
+              type="link"
+              onClick={(e) => {
+                e.stopPropagation();
+                openDrawer(result, true);
+              }}
+            >
+              +{more}
+            </Button>
+          ) : null}
         </div>
       ) : null}
       <div className="jh-card-foot">
@@ -879,7 +922,15 @@ function ResultCard({ result }: { result: ScanResultView }) {
   );
 }
 
-function ResultList({ results, hasItems }: { results: ScanResultView[]; hasItems: boolean }) {
+function ResultList({
+  results,
+  hasItems,
+  scrollParent,
+}: {
+  results: ScanResultView[];
+  hasItems: boolean;
+  scrollParent: HTMLElement | null;
+}) {
   const scan = useUi((s) => s.scan);
   const kind = scan?.conditions?.rentKind ?? 'HOUR';
   const favorites = useFavoriteSet();
@@ -890,8 +941,8 @@ function ResultList({ results, hasItems }: { results: ScanResultView[]; hasItems
         <span />
         <span>账号编号</span>
         <span>状态</span>
-        <span>命中饰品</span>
-        {hasItems ? <span>命中件数</span> : null}
+        <span>{hasItems ? '命中饰品' : '饰品'}</span>
+        {hasItems ? <span>命中</span> : null}
         <span>{RENT_META[kind].label}单价</span>
         <span>总价值</span>
         <span>卖点</span>
@@ -903,9 +954,11 @@ function ResultList({ results, hasItems }: { results: ScanResultView[]; hasItems
         gap={0}
         getKey={(r) => r.account.accountNo}
         ariaLabel="结果列表"
+        scrollParent={scrollParent}
         render={(r) => {
-          const shown =
-            r.hitItems.length > 0 ? r.hitItems.slice(0, 3) : r.account.displayItems.slice(0, 3);
+          const shown = resultDisplayItems(r.hitItems, fillCandidates(r), LIST_ITEM_SLOTS);
+          const hitKeys = new Set(r.hitItems.map((i) => i.key));
+          const shownHits = shown.filter((i) => hitKeys.has(i.key)).length;
           const isSearchEvidence = r.evidence === 'search' || r.hitCount === null;
           return (
             // biome-ignore lint/a11y/useSemanticElements: 行内含收藏按钮，不能嵌套在 <button> 中
@@ -914,19 +967,17 @@ function ResultList({ results, hasItems }: { results: ScanResultView[]; hasItems
               role="button"
               tabIndex={0}
               onClick={() => openDrawer(r)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') openDrawer(r);
-              }}
+              onKeyDown={activateOnKey(() => openDrawer(r))}
             >
               <FavoriteStar accountNo={r.account.accountNo} />
               <span className="jh-account">{r.account.accountNo}</span>
               <StatusBadge status={r.account.status} />
               <span className="jh-list-items">
                 {shown.map((i) => (
-                  <ItemCard key={i.key} item={i} compact hit={r.hitItems.length > 0} />
+                  <ItemCard key={i.key} item={i} compact hit={hitKeys.has(i.key)} />
                 ))}
-                {r.hitCount != null && r.hitCount > shown.length ? (
-                  <span className="jh-small">+{r.hitCount - shown.length}</span>
+                {r.hitCount != null && r.hitCount > shownHits ? (
+                  <span className="jh-small">+{r.hitCount - shownHits}</span>
                 ) : null}
               </span>
               {hasItems ? (

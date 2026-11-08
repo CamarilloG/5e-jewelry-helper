@@ -154,6 +154,19 @@ export function selectGridItems(items: readonly ItemView[]): ItemView[] {
   return picked;
 }
 
+/** 筛选结果卡片的补位饰品：从完整库存中排除命中项后，按估价从高到低取前几件。 */
+export function selectFillItems(
+  items: readonly InventoryItem[],
+  hitKeys: ReadonlySet<string>,
+  limit = 4,
+): ItemView[] {
+  return items
+    .filter((item) => !hitKeys.has(item.key))
+    .map(toItemView)
+    .sort(compareGridItemsByPriceDesc)
+    .slice(0, limit);
+}
+
 /** 收藏行与通知使用的摘要：卖点、各租期价格、3×3 宫格选图与兼容单缩略图。 */
 export interface AccountSummary {
   tags: string[];

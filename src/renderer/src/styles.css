@@ -10,6 +10,12 @@
   --jh-warn: #f59e0b;
   --jh-off: #6b7280;
   --jh-risk: #ef4444;
+  --jh-primary-soft: #e8e7fc;
+  --jh-primary-hover: #eceefa;
+  --jh-primary-border: #c7c4f7;
+  --jh-line: #f0f1f3;
+  --jh-warn-text: #b45309;
+  --jh-border-strong: #d1d5db;
   --jh-nav: 184px;
   --jh-cond: 288px;
   --jh-statusbar: 32px;
@@ -92,14 +98,16 @@ body.jh-resizing {
   text-align: left;
 }
 .jh-nav-item:hover {
-  background: #eceefa;
+  background: var(--jh-primary-hover);
 }
 .jh-nav-item.active {
-  background: #e8e7fc;
+  background: var(--jh-primary-soft);
   color: var(--jh-primary);
   font-weight: 600;
 }
 .jh-nav-item:focus-visible,
+.jh-fav-grid:focus-visible,
+.jh-pending-head:focus-visible,
 .jh-seg:focus-visible,
 .jh-card:focus-visible,
 .jh-list-row:focus-visible,
@@ -160,11 +168,11 @@ body.jh-resizing {
   font-size: 12px;
 }
 .jh-warn-small {
-  color: #b45309;
+  color: var(--jh-warn-text);
   font-size: 12px;
 }
 .jh-warn-text {
-  color: #b45309;
+  color: var(--jh-warn-text);
 }
 .jh-price {
   color: var(--jh-primary);
@@ -274,11 +282,18 @@ body.jh-resizing {
   grid-template-columns: repeat(3, 1fr);
   row-gap: 6px;
 }
+/* 条件很多时操作区吸在面板底部；-14px 抵消面板内边距 */
 .jh-actions {
+  position: sticky;
+  bottom: -14px;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: 16px;
+  margin: 16px -14px -14px;
+  padding: 10px 14px 14px;
+  background: #fff;
+  border-top: 1px solid var(--jh-border);
 }
 .jh-results {
   display: flex;
@@ -305,16 +320,15 @@ body.jh-resizing {
   padding: 8px 16px;
   flex-wrap: wrap;
 }
-.jh-scope {
+.jh-scope-icon {
+  margin-left: 6px;
   color: var(--jh-muted);
-  font-size: 12px;
 }
 .jh-results-body {
   flex: 1;
   min-height: 0;
   padding: 0 16px 12px;
-  display: flex;
-  flex-direction: column;
+  overflow-y: auto;
 }
 .jh-pending-group {
   background: #fff;
@@ -342,16 +356,8 @@ body.jh-resizing {
 .jh-pending-head:hover {
   background: #ecebfa;
 }
-.jh-pending-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-  gap: 10px;
+.jh-pending-body {
   padding: 10px 12px;
-  max-height: 310px;
-  overflow-y: auto;
-}
-.jh-pending-cell {
-  min-height: 240px;
 }
 .jh-skeletons {
   display: grid;
@@ -367,6 +373,9 @@ body.jh-resizing {
   position: relative;
   height: 100%;
 }
+.jh-virtual-inline {
+  position: relative;
+}
 .jh-card {
   height: 100%;
   background: #fff;
@@ -380,7 +389,7 @@ body.jh-resizing {
   overflow: hidden;
 }
 .jh-card:hover {
-  border-color: #c7c4f7;
+  border-color: var(--jh-primary-border);
   box-shadow: 0 2px 10px rgba(79, 70, 229, 0.08);
 }
 .jh-card-head {
@@ -393,16 +402,21 @@ body.jh-resizing {
 }
 .jh-card-sub {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   align-items: center;
   flex-wrap: wrap;
 }
+.jh-card-sub .ant-tag {
+  margin: 0;
+  padding: 0 5px;
+  font-size: 11px;
+}
 .jh-card-items {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
   align-items: center;
-  flex-wrap: wrap;
-  min-height: 64px;
+  min-height: 52px;
 }
 .jh-card-foot {
   display: flex;
@@ -412,34 +426,51 @@ body.jh-resizing {
 }
 .jh-card-other {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px 8px;
+  gap: 8px;
   align-items: center;
   min-height: 22px;
+  overflow: hidden;
+  white-space: nowrap;
 }
 .jh-list {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
+  container-type: inline-size;
   background: #fff;
   border: 1px solid var(--jh-border);
   border-radius: 8px;
 }
 .jh-list-row {
   display: grid;
-  grid-template-columns: 40px 150px 110px 1fr 70px 110px 100px 1.2fr;
+  grid-template-columns: 36px 120px 76px minmax(164px, 1fr) 44px 88px 70px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   padding: 0 12px;
   height: 56px;
-  border-bottom: 1px solid #f0f1f3;
+  border-bottom: 1px solid var(--jh-line);
   cursor: pointer;
 }
 .jh-list-row.no-hit {
-  grid-template-columns: 40px 150px 110px 1fr 110px 100px 1.2fr;
+  grid-template-columns: 36px 120px 76px minmax(164px, 1fr) 88px 70px minmax(0, 1fr);
+}
+.jh-list-row .jh-status {
+  justify-self: start;
+}
+/* 列表放不下时收起最后的卖点列 */
+@container (max-width: 820px) {
+  .jh-list-row {
+    grid-template-columns: 36px 120px 76px minmax(164px, 1fr) 44px 88px 70px;
+  }
+  .jh-list-row.no-hit {
+    grid-template-columns: 36px 120px 76px minmax(164px, 1fr) 88px 70px;
+  }
+  .jh-list-row > :nth-child(n + 8),
+  .jh-list-row.no-hit > :nth-child(n + 7) {
+    display: none;
+  }
 }
 .jh-list-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   height: 38px;
   font-size: 12px;
   color: var(--jh-muted);
@@ -453,6 +484,7 @@ body.jh-resizing {
   display: flex;
   gap: 4px;
   align-items: center;
+  min-width: 0;
 }
 
 /* 饰品缩略卡 */
@@ -545,7 +577,23 @@ body.jh-resizing {
   font-size: 10px;
   color: var(--jh-muted);
   padding: 2px;
-  border: 1px dashed #d1d5db;
+  border: 1px dashed var(--jh-border-strong);
+}
+
+.jh-item-compact .jh-hit {
+  top: 3px;
+  left: 2px;
+  padding: 0 3px;
+  font-size: 9px;
+  line-height: 12px;
+}
+.jh-list-items .jh-item-compact {
+  width: 44px;
+  flex-shrink: 0;
+}
+.jh-card-items .jh-item-compact {
+  width: auto;
+  min-width: 0;
 }
 
 /* P2 抽屉 */
@@ -558,16 +606,50 @@ body.jh-resizing {
   top: 0;
   bottom: 0;
   width: 6px;
+  padding: 0;
+  border: 0;
+  appearance: none;
+  background: transparent;
   cursor: ew-resize;
   z-index: 5;
+  transition: background 0.15s;
 }
-.jh-drawer-handle:hover {
-  background: rgba(79, 70, 229, 0.15);
+/* 平时不可见，悬停、拖动或键盘聚焦时才显示调整宽度的提示 */
+.jh-drawer-handle:hover,
+.jh-drawer-handle:focus-visible,
+body.jh-resizing .jh-drawer-handle {
+  background: rgba(79, 70, 229, 0.35);
+  outline: none;
+}
+.jh-detail {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.jh-detail-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.jh-order {
+  flex-shrink: 0;
+  max-height: 60%;
+  overflow-y: auto;
+  padding: 10px 16px 8px;
+  background: #fff;
+  border-top: 1px solid var(--jh-border);
+  box-shadow: 0 -4px 12px rgba(17, 24, 39, 0.06);
+}
+.jh-order .jh-section-title {
+  margin: 0 0 6px;
+}
+.jh-order-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 .jh-detail-head {
-  position: sticky;
-  top: 0;
-  z-index: 3;
+  flex-shrink: 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -588,7 +670,7 @@ body.jh-resizing {
   padding: 12px 16px;
 }
 .jh-section {
-  border-top: 1px solid #f0f1f3;
+  border-top: 1px solid var(--jh-line);
 }
 .jh-tags-all {
   margin: 8px 0 4px;
@@ -610,6 +692,48 @@ body.jh-resizing {
 }
 .jh-price-cell.jh-disabled {
   color: #9ca3af;
+}
+.jh-cat-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.jh-cat-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--jh-border);
+  border-radius: 6px;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+  color: var(--jh-text);
+  cursor: pointer;
+}
+.jh-cat-tab .jh-num {
+  color: var(--jh-muted);
+}
+.jh-cat-tab:hover {
+  border-color: var(--jh-primary-border);
+}
+.jh-cat-tab.active {
+  background: var(--jh-primary-soft);
+  border-color: var(--jh-primary);
+  color: var(--jh-primary);
+  font-weight: 600;
+}
+.jh-cat-tab.active .jh-num {
+  color: var(--jh-primary);
+}
+.jh-cat-tab:focus-visible {
+  outline: 2px solid var(--jh-primary);
+  outline-offset: 1px;
 }
 .jh-inline-error {
   color: var(--jh-risk);
@@ -673,6 +797,8 @@ body.jh-resizing {
   gap: 8px;
 }
 .jh-fav-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 114px;
   display: grid;
   grid-template-columns: 114px 1fr auto;
   gap: 14px;
@@ -697,7 +823,7 @@ body.jh-resizing {
   flex-shrink: 0;
 }
 .jh-fav-grid:hover {
-  border-color: #c7c4f7;
+  border-color: var(--jh-primary-border);
 }
 .jh-fav-grid-cell {
   width: 34px;
@@ -719,6 +845,7 @@ body.jh-resizing {
 }
 .jh-fav-focus {
   outline: 2px solid var(--jh-primary);
+  outline-offset: -2px;
 }
 .jh-fav-main {
   display: flex;
@@ -779,7 +906,7 @@ body.jh-resizing {
   place-items: center;
   text-align: center;
   padding: 12px;
-  border: 1px dashed #d1d5db;
+  border: 1px dashed var(--jh-border-strong);
   border-radius: 8px;
   color: var(--jh-muted);
   font-size: 12px;
@@ -846,10 +973,44 @@ body.jh-resizing {
   grid-template-columns: 160px 1fr;
   min-height: 0;
 }
-.jh-settings-anchor {
-  padding: 16px 8px;
+.jh-settings-nav {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 10px;
   border-right: 1px solid var(--jh-border);
-  background: var(--jh-zone);
+  background: #fff;
+}
+.jh-settings-nav .jh-settings-anchor {
+  margin: 0;
+  padding: 0;
+}
+.jh-settings-nav .ant-anchor::before,
+.jh-settings-nav .jh-settings-anchor.ant-anchor-wrapper .ant-anchor .ant-anchor-ink {
+  display: none;
+}
+.jh-settings-nav .ant-anchor .ant-anchor-link {
+  padding: 0;
+  margin-bottom: 2px;
+}
+.jh-settings-nav .ant-anchor .ant-anchor-link-title {
+  display: block;
+  padding: 7px 10px;
+  border-radius: 6px;
+  color: var(--jh-text);
+}
+.jh-settings-nav .ant-anchor .ant-anchor-link-title:hover {
+  background: var(--jh-primary-hover);
+  color: var(--jh-text);
+}
+.jh-settings-nav .ant-anchor .ant-anchor-link-title-active,
+.jh-settings-nav .ant-anchor .ant-anchor-link-title-active:hover {
+  background: var(--jh-primary-soft);
+  color: var(--jh-primary);
+  font-weight: 600;
+}
+.jh-settings-nav .ant-anchor .ant-anchor-link-title:focus-visible {
+  outline: 2px solid var(--jh-primary);
+  outline-offset: 1px;
 }
 .jh-settings-body {
   overflow: auto;
@@ -857,7 +1018,7 @@ body.jh-resizing {
 }
 .jh-settings-group {
   padding: 12px 0 8px;
-  border-bottom: 1px solid #f0f1f3;
+  border-bottom: 1px solid var(--jh-line);
 }
 .jh-settings-group h3 {
   margin: 8px 0 12px;
@@ -936,7 +1097,7 @@ body.jh-resizing {
   font-variant-numeric: tabular-nums;
 }
 .jh-seg:hover {
-  background: #eceefa;
+  background: var(--jh-primary-hover);
 }
 .jh-seg-tag {
   margin-left: 10px;

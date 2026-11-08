@@ -1,5 +1,5 @@
 // P6 常用方案：套用（跳 P1 并自动筛选）、行内重命名（非空、不重名）、删除二次确认；按上次使用倒序。
-import { App, Button, Empty, Input, Space, Tooltip } from 'antd';
+import { App, Button, Empty, Input, Result, Skeleton, Space, Tooltip } from 'antd';
 import { useEffect, useState } from 'react';
 import type { FilterPresetView } from '../../../shared/dto';
 import { call } from '../api';
@@ -11,9 +11,16 @@ export function PresetsPage() {
   const { modal, message } = App.useApp();
   const [list, setList] = useState<FilterPresetView[] | null>(null);
   const [editing, setEditing] = useState<{ id: string; name: string } | null>(null);
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
     void version;
-    call('filters.list').then(setList, () => setList([]));
+    call('filters.list').then(
+      (next) => {
+        setList(next);
+        setFailed(false);
+      },
+      () => setFailed(true),
+    );
   }, [version]);
   const bump = () => useUi.setState((s) => ({ presetsVersion: s.presetsVersion + 1 }));
   const apply = async (p: FilterPresetView) => {
@@ -41,7 +48,25 @@ export function PresetsPage() {
     setEditing(null);
     bump();
   };
-  if (list && list.length === 0) {
+  if (failed && !list) {
+    return (
+      <div className="jh-page">
+        <Result
+          status="warning"
+          title="常用方案加载失败"
+          extra={<Button onClick={bump}>重试</Button>}
+        />
+      </div>
+    );
+  }
+  if (!list) {
+    return (
+      <div className="jh-page">
+        <Skeleton active paragraph={{ rows: 4 }} />
+      </div>
+    );
+  }
+  if (list.length === 0) {
     return (
       <div className="jh-page">
         <div className="jh-empty">
@@ -56,9 +81,9 @@ export function PresetsPage() {
   }
   return (
     <div className="jh-page">
-      <div className="jh-page-head">共 {list?.length ?? 0} 个方案</div>
+      <div className="jh-page-head">共 {list.length} 个方案</div>
       <div className="jh-preset-list">
-        {(list ?? []).map((p) => (
+        {list.map((p) => (
           <div key={p.id} className="jh-preset-row">
             <div className="jh-preset-main">
               {editing?.id === p.id ? (

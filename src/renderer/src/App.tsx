@@ -2,7 +2,7 @@
 import { AppstoreOutlined, FilterOutlined, SettingOutlined, StarOutlined } from '@ant-design/icons';
 import { Alert, App as AntApp, Badge, Button, Result, Space, Tag } from 'antd';
 import { useEffect, useState } from 'react';
-import { call, on } from './api';
+import { call, isIpcError, on } from './api';
 import { CheckoutModal } from './components/CheckoutModal';
 import { DetailDrawer } from './components/DetailDrawer';
 import { PresetEditor } from './components/PresetEditor';
@@ -79,6 +79,13 @@ function useMainEvents() {
         }),
       ),
     ];
+    // 页面未单独处理的操作失败统一提示，避免点击后没有任何反馈
+    const onRejection = (event: PromiseRejectionEvent) => {
+      if (!isIpcError(event.reason)) return;
+      event.preventDefault();
+      message.error(event.reason.message || '操作失败，请重试');
+    };
+    window.addEventListener('unhandledrejection', onRejection);
     void call('app.status').then((status) => useUi.setState({ status }));
     void call('scan.state').then((scan) => useUi.setState({ scan }));
     void call('favorites.state').then((favorites) => useUi.setState({ favorites }));
@@ -86,6 +93,7 @@ function useMainEvents() {
     void call('settings.get').then((settings) => useUi.setState({ settings }));
     return () => {
       for (const off of offs) off();
+      window.removeEventListener('unhandledrejection', onRejection);
     };
   }, [message, modal]);
 }
@@ -282,7 +290,10 @@ function StatusBar() {
   return (
     <footer className="jh-statusbar">
       <button type="button" className="jh-seg" onClick={() => go('SETTINGS', 'auth')}>
-        <span className="jh-dot" style={{ background: authOk ? '#22C55E' : '#EF4444' }} />
+        <span
+          className="jh-dot"
+          style={{ background: authOk ? 'var(--jh-ok)' : 'var(--jh-risk)' }}
+        />
         {authOk
           ? `登录态正常${auth.daysLeft != null ? ` · 剩 ${auth.daysLeft} 天` : ''}`
           : auth.phase === 'NO_LOGIN' || auth.phase === 'NO_CLIENT'

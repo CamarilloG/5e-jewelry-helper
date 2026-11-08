@@ -17,6 +17,7 @@ import { cleanCondition } from '../../shared/conditions';
 import type {
   FailedSearchPage,
   FilterConditions,
+  ItemView,
   MatchEvidenceKind,
   ScanResultView,
   ScanView,
@@ -36,7 +37,7 @@ import { isCancelled, PlatformError, userMessage } from '../platform/errors';
 import { Priority } from '../platform/queue';
 import type { AccountRecord, InventoryItem } from '../platform/schemas';
 import type { AccountService } from './account-service';
-import { toAccountView, toItemView } from './views';
+import { selectFillItems, toAccountView, toItemView } from './views';
 
 interface Candidate {
   accountNo: string;
@@ -265,6 +266,7 @@ export class ScanService {
         score: match.score,
         hitCount: match.score,
         hitItems,
+        fillItems: selectFillItems(items, hit),
         evidence: 'inventory',
         verifiedAt: this.now(),
       });
@@ -650,6 +652,7 @@ export class ScanService {
         let score: number | null = 0;
         let hitCount: number | null = 0;
         let hitItems: InventoryItem[] = [];
+        let fillItems: ItemView[] | undefined;
         let evidence: MatchEvidenceKind = 'inventory';
         let verifiedAt = fetchedAt;
 
@@ -671,6 +674,7 @@ export class ScanService {
             hitCount = match.score;
             verifiedAt = match.verifiedAt;
             const hit = new Set(match.hitKeys);
+            fillItems = selectFillItems(inv.items, hit);
             hitItems = inv.items
               .filter((i: InventoryItem) => hit.has(i.key))
               .sort(
@@ -682,6 +686,7 @@ export class ScanService {
             if (!existing) continue;
             score = existing.score;
             hitCount = existing.hitCount;
+            fillItems = existing.fillItems;
             evidence = existing.evidence ?? 'search';
             verifiedAt = existing.verifiedAt ?? fetchedAt;
           }
@@ -701,6 +706,7 @@ export class ScanService {
           account: accountView,
           score,
           hitItems: hitItems.slice(0, 4).map(toItemView),
+          fillItems,
           hitCount,
           favorite: favorites.has(accountNo),
           origin: 'local',
@@ -1011,6 +1017,7 @@ export class ScanService {
             account: toAccountView(acc, this.now()),
             score: existing?.evidence === 'inventory' ? existing.score : null,
             hitItems: existing?.hitItems ?? [],
+            fillItems: existing?.fillItems,
             hitCount: existing?.evidence === 'inventory' ? existing.hitCount : null,
             favorite: existing?.favorite ?? false,
             origin: 'platform',
@@ -1107,6 +1114,7 @@ export class ScanService {
           account: toAccountView(acc, this.now()),
           score: match.score,
           hitItems: hitItems.slice(0, 4).map(toItemView),
+          fillItems: selectFillItems(inv.items, hit),
           hitCount: match.score,
           favorite: false,
           origin: 'platform',
@@ -1613,6 +1621,7 @@ export class ScanService {
     let score: number | null = 0;
     let hitCount: number | null = 0;
     let hitItems: InventoryItem[] = [];
+    let fillItems: ItemView[] | undefined;
     let evidence: MatchEvidenceKind = 'inventory';
     let verifiedAt = fetchedAt;
 
@@ -1663,6 +1672,7 @@ export class ScanService {
         evidence = 'inventory';
         verifiedAt = match.verifiedAt;
         const hit = new Set(match.hitKeys);
+        fillItems = selectFillItems(inv.items, hit);
         hitItems = inv.items
           .filter((i: InventoryItem) => hit.has(i.key))
           .sort(
@@ -1693,6 +1703,7 @@ export class ScanService {
       account: toAccountView(record, fetchedAt),
       score,
       hitItems: hitItems.slice(0, 4).map(toItemView),
+      fillItems,
       hitCount,
       favorite: favorites.has(cand.accountNo),
       origin: cand.origin,
@@ -1957,6 +1968,7 @@ export class ScanService {
           account: accountView,
           score: match.score,
           hitItems,
+          fillItems: selectFillItems(inv.items, hit),
           hitCount: match.score,
           favorite: false,
           origin: 'local',

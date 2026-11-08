@@ -55,6 +55,41 @@ export const CATEGORY_GROUPS: CategoryGroup[] = [
   { id: 'f:机枪', label: '机枪', firstType: '机枪' },
 ];
 
+export interface InventoryCategoryTab {
+  /** 库存 firstType；缺失时归入「其他」 */
+  key: string;
+  label: string;
+  count: number;
+}
+
+const OTHER_CATEGORY = '其他';
+
+export function inventoryCategoryKey(firstType: string | null | undefined): string {
+  return (firstType ?? '').trim() || OTHER_CATEGORY;
+}
+
+/** 详情库存的分类页签：只列实际存在的类别，已知大类在前且顺序固定，未知类别按名称排在后面。 */
+export function inventoryCategoryTabs(
+  items: readonly { firstType: string | null | undefined }[],
+): InventoryCategoryTab[] {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    const key = inventoryCategoryKey(item.firstType);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const known = CATEGORY_GROUPS.filter((g) => counts.has(g.firstType)).map((g) => ({
+    key: g.firstType,
+    label: g.label,
+    count: counts.get(g.firstType) ?? 0,
+  }));
+  const knownKeys = new Set(CATEGORY_GROUPS.map((g) => g.firstType));
+  const rest = [...counts.entries()]
+    .filter(([key]) => !knownKeys.has(key))
+    .sort(([a], [b]) => a.localeCompare(b, 'zh-CN'))
+    .map(([key, count]) => ({ key, label: key, count }));
+  return [...known, ...rest];
+}
+
 const REF_DOC = 'docs/验证记录.md#搜索关键词语义实测';
 
 const verifiedFull = (
