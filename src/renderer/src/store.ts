@@ -13,8 +13,10 @@ export type Page = 'FILTER' | 'FAVORITES' | 'PRESETS' | 'SETTINGS';
 
 export interface ConditionRow {
   id: number;
-  categoryId: string | null;
-  name: string;
+  /** 大类 / 子类 id，多选取任一 */
+  categoryIds: string[];
+  /** 皮肤名称，多选取任一 */
+  names: string[];
 }
 
 export interface FilterForm {
@@ -37,10 +39,10 @@ export interface DrawerState {
 }
 
 let rowSeq = 1;
-export const newRow = (categoryId: string | null = null, name = ''): ConditionRow => ({
+export const newRow = (categoryIds: string[] = [], names: string[] = []): ConditionRow => ({
   id: rowSeq++,
-  categoryId,
-  name,
+  categoryIds,
+  names,
 });
 
 export const emptyForm = (): FilterForm => ({
@@ -57,8 +59,11 @@ export const emptyForm = (): FilterForm => ({
 export function formToConditions(form: FilterForm): FilterConditions {
   return {
     items: form.rows
-      .filter((r) => r.categoryId || r.name.trim())
-      .map((r) => ({ categoryId: r.categoryId, name: r.name.trim() || null })),
+      .map((r) => ({
+        categoryIds: [...r.categoryIds],
+        names: r.names.map((n) => n.trim()).filter(Boolean),
+      }))
+      .filter((r) => r.categoryIds.length > 0 || r.names.length > 0),
     rentKind: form.rentKind,
     priceMin: form.priceMin.trim() || null,
     priceMax: form.priceMax.trim() || null,
@@ -71,7 +76,7 @@ export function conditionsToForm(
   preset: { id: string; name: string } | null,
 ): FilterForm {
   const rows =
-    c.items.length > 0 ? c.items.map((i) => newRow(i.categoryId, i.name ?? '')) : [newRow()];
+    c.items.length > 0 ? c.items.map((i) => newRow([...i.categoryIds], [...i.names])) : [newRow()];
   return {
     rows,
     rentKind: c.rentKind,

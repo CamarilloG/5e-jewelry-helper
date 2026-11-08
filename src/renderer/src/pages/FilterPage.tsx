@@ -2,8 +2,8 @@
 import { CloseOutlined, PlusOutlined } from '@ant-design/icons';
 import {
   App,
-  AutoComplete,
   Button,
+  Cascader,
   Checkbox,
   Empty,
   Input,
@@ -18,7 +18,13 @@ import {
   Tooltip,
 } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
-import { CATEGORIES, CATEGORY_BY_ID, SKIN_SUGGESTIONS } from '../../../shared/catalog';
+import {
+  CATEGORIES,
+  CATEGORY_BY_ID,
+  CATEGORY_GROUPS,
+  categoryDisplay,
+  SKIN_SUGGESTIONS,
+} from '../../../shared/catalog';
 import type { FilterPresetView, ScanResultView } from '../../../shared/dto';
 import { compareDecimalText, formatYuan } from '../../../shared/money';
 import { RENT_KINDS, RENT_META } from '../../../shared/rent';
@@ -40,15 +46,41 @@ const PRICE_RE = /^\d{0,7}(\.\d{0,2})?$/;
 type SortKey = 'SCORE' | 'PRICE_ASC' | 'PRICE_DESC' | 'VALUE_ASC' | 'VALUE_DESC';
 type StatusFilter = 'AVAILABLE' | 'ALL' | 'RENTED' | 'OFF_SHELF';
 
-const categoryOptions = (() => {
-  const groups = new Map<string, { label: string; value: string }[]>();
-  for (const c of CATEGORIES) {
-    const list = groups.get(c.group) ?? [];
-    list.push({ label: c.label, value: c.id });
-    groups.set(c.group, list);
-  }
-  return [...groups.entries()].map(([label, options]) => ({ label, options }));
-})();
+interface CascadeOption {
+  label: string;
+  value: string;
+  children?: CascadeOption[];
+}
+
+// 第一层大类、第二层子类；勾选整个大类 = 该大类任意饰品
+const categoryOptions: CascadeOption[] = CATEGORY_GROUPS.map((g) => ({
+  label: g.label,
+  value: g.id,
+  children: CATEGORIES.filter((c) => c.kind === 'weapon' && c.groupId === g.id).map((c) => ({
+    label: c.label,
+    value: c.id,
+  })),
+}));
+
+/** 条件 id → 级联路径 */
+function idToPath(id: string): string[] {
+  const entry = CATEGORY_BY_ID.get(id);
+  if (!entry) return [];
+  return entry.kind === 'first' ? [id] : [entry.groupId, id];
+}
+
+/** 级联路径 → 条件 id（整组勾选时为大类 id） */
+function pathToId(path: (string | number)[]): string | null {
+  const last = path[path.length - 1];
+  return typeof last === 'string' ? last : null;
+}
+
+/** 只含大类、没有皮肤名称的行无法用关键词检索 */
+function rowNeedsBrowse(row: { categoryIds: string[]; names: string[] }) {
+  return (
+    row.names.length === 0 && row.categoryIds.some((id) => CATEGORY_BY_ID.get(id)?.kind === 'first')
+  );
+}
 
 function priceInvalid(form: FilterForm) {
   return (
@@ -86,9 +118,13 @@ function ConditionPanel() {
   const invalid =
     priceInvalid(form) || !PRICE_RE.test(form.priceMin) || !PRICE_RE.test(form.priceMax);
   const active = scan?.phase === 'CANDIDATES' || scan?.phase === 'VERIFYING';
-  const noKeyword = form.rows.some(
-    (r) => r.categoryId && !r.name.trim() && !CATEGORY_BY_ID.get(r.categoryId)?.keyword,
-  );
+  const filled = form.rows.filter((r) => r.categoryIds.length > 0 || r.names.length > 0);
+  const noKeyword = filled.length > 0 && filled.every(rowNeedsBrowse);
+  const updateRow = (id: number, patch: Partial<{ categoryIds: string[]; names: string[] }>) =>
+    setForm((f) => ({
+      ...f,
+      rows: f.rows.map((r) => (r.id === id ? { ...r, ...patch } : r)),
+    }));
 
   const start = async (next?: FilterForm) => {
     const f = next ?? form;
@@ -147,41 +183,67 @@ function ConditionPanel() {
                 />
               </Tooltip>
             </div>
-            <Select
+            <Cascader<CascadeOption>
+              multiple
               allowClear
-              showSearch
-              optionFilterProp="label"
-              placeholder="大类 / 刀型 / 武器"
+              showSearch={{
+                filter: (input, path) =>
+                  path.some((o) => o.label.toLowerCase().includes(input.trim().toLowerCase())),
+              }}
+              showCheckedStrategy={Cascader.SHOW_PARENT}
+              expandTrigger="hover"
+              placeholder="大类 / 子类（可多选，任一即可）"
               style={{ width: '100%', marginBottom: 6 }}
-              value={row.categoryId ?? undefined}
+              value={row.categoryIds.map(idToPath).filter((p) => p.length > 0)}
               options={categoryOptions}
-              aria-label={`条件 ${index + 1} 大类`}
-              onChange={(value?: string) =>
-                setForm((f) => ({
-                  ...f,
-                  rows: f.rows.map((r) =>
-                    r.id === row.id ? { ...r, categoryId: value ?? null } : r,
-                  ),
-                }))
+              displayRender={(labels) => labels[labels.length - 1]}
+              tagRender={({ label, closable, onClose }) => {
+                // 大类名与子类名互不重复，整组勾选的标签显示为「任意××」
+                const whole = CATEGORY_GROUPS.some((g) => g.label === label);
+                return (
+                  <Tag closable={closable} onClose={onClose} style={{ marginInlineEnd: 4 }}>
+                    {whole ? `任意${String(label)}` : label}
+                  </Tag>
+                );
+              }}
+              aria-label={`条件 ${index + 1} 大类与子类`}
+              onChange={(paths: (string | number)[][]) =>
+                updateRow(row.id, {
+                  categoryIds: (paths ?? [])
+                    .map((p) => pathToId(p))
+                    .filter((id): id is string => !!id),
+                })
               }
             />
-            <AutoComplete
+            <Select
+              mode="tags"
+              allowClear
               style={{ width: '100%' }}
-              placeholder="名称，如 多普勒"
-              value={row.name}
-              options={SKIN_SUGGESTIONS.filter((s) => !row.name || s.includes(row.name.trim())).map(
-                (s) => ({ value: s }),
-              )}
-              aria-label={`条件 ${index + 1} 名称`}
-              onChange={(value: string) =>
-                setForm((f) => ({
-                  ...f,
-                  rows: f.rows.map((r) =>
-                    r.id === row.id ? { ...r, name: value.slice(0, 40) } : r,
-                  ),
-                }))
+              placeholder="皮肤，如 多普勒（可多选或直接输入）"
+              value={row.names}
+              options={SKIN_SUGGESTIONS.map((s) => ({ value: s, label: s }))}
+              tokenSeparators={[',', '，']}
+              aria-label={`条件 ${index + 1} 皮肤`}
+              onChange={(values: string[]) =>
+                updateRow(row.id, {
+                  names: [
+                    ...new Set(values.map((v) => v.trim().slice(0, 40)).filter(Boolean)),
+                  ].slice(0, 20),
+                })
               }
             />
+            {row.categoryIds.length > 1 || row.names.length > 1 ? (
+              <div className="jh-small" style={{ marginTop: 4 }}>
+                同一件饰品满足
+                {row.categoryIds.length > 1 ? '任一所选类别' : '所选类别'}
+                {row.names.length > 0
+                  ? row.names.length > 1
+                    ? '且任一所选皮肤'
+                    : '且所选皮肤'
+                  : ''}
+                即可
+              </div>
+            ) : null}
           </fieldset>
         </div>
       ))}
@@ -195,7 +257,7 @@ function ConditionPanel() {
       </Button>
       {noKeyword ? (
         <div className="jh-hint">
-          只选大类时无法用单个关键词检索，将浏览该租期全部账号并逐个确认，耗时较长；建议再填写名称。
+          条件只有“任意大类”时无法用关键词检索，将浏览该租期全部账号并逐个确认，耗时较长；建议再加一行具体子类或皮肤。
         </div>
       ) : null}
       <div className="jh-section-title">租期</div>
@@ -282,11 +344,9 @@ function SavePresetModal({
     const c = formToConditions(form);
     const auto = c.items
       .map((i) =>
-        [i.categoryId ? CATEGORY_BY_ID.get(i.categoryId)?.label : null, i.name]
-          .filter(Boolean)
-          .join(''),
+        [i.categoryIds.map(categoryDisplay).join('/'), i.names.join('/')].filter(Boolean).join(' '),
       )
-      .join('+');
+      .join(' + ');
     setName(
       form.presetName ?? `${auto || '不限饰品'} · ${RENT_META[c.rentKind].label}`.slice(0, 40),
     );
@@ -421,9 +481,12 @@ function Results() {
   const active = phase === 'CANDIDATES' || phase === 'VERIFYING';
 
   const examples: { label: string; form: Partial<FilterForm> }[] = [
-    { label: '蝴蝶刀 + 多普勒', form: { rows: [newRow('w:蝴蝶刀', '多普勒')] } },
-    { label: '爪子刀 且 运动手套', form: { rows: [newRow('w:爪子刀'), newRow('w:运动手套')] } },
-    { label: '多普勒 · 时租 ≤ ¥10', form: { rows: [newRow(null, '多普勒')], priceMax: '10' } },
+    { label: '蝴蝶刀 + 多普勒', form: { rows: [newRow(['w:蝴蝶刀'], ['多普勒'])] } },
+    {
+      label: '蝴蝶刀或爪子刀 且 任意手套',
+      form: { rows: [newRow(['w:蝴蝶刀', 'w:爪子刀']), newRow(['f:手套'])] },
+    },
+    { label: '多普勒 · 时租 ≤ ¥10', form: { rows: [newRow([], ['多普勒'])], priceMax: '10' } },
   ];
 
   return (

@@ -1,5 +1,6 @@
 // 白名单 IPC 契约：每个频道一个 Zod 输入 schema；主进程逐个校验来源窗口与参数（技术选型 §3）。
 import { z } from 'zod';
+import { MAX_NAME_LENGTH, MAX_ROW_CATEGORIES, MAX_ROW_NAMES } from './conditions';
 import type {
   CheckoutStartResult,
   CheckoutView,
@@ -32,8 +33,8 @@ export const filterConditionsSchema = z
     items: z
       .array(
         z.object({
-          categoryId: z.string().max(64).nullable(),
-          name: z.string().trim().max(40).nullable(),
+          categoryIds: z.array(z.string().max(64)).max(MAX_ROW_CATEGORIES),
+          names: z.array(z.string().trim().max(MAX_NAME_LENGTH)).max(MAX_ROW_NAMES),
         }),
       )
       .max(50),

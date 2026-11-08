@@ -1,4 +1,14 @@
 // 组合根：与 Electron 无关，供桌面主进程和离线预览共用。主进程独占业务规则，界面只渲染 DTO。
+
+import { BUILTIN_FILTER_PRESETS } from '../shared/builtin-presets';
+import { categoryDisplay } from '../shared/catalog';
+import {
+  cleanCondition,
+  conditionIsEmpty,
+  FILTER_SCHEMA_VERSION,
+  type ItemCondition,
+  upgradeConditions,
+} from '../shared/conditions';
 import type {
   BannerView,
   DetailView,
@@ -51,7 +61,6 @@ import type { DbClient } from './storage/client';
 export const RELEASES_URL = 'https://github.com/CamarilloG/5e-jewelry-helper/releases';
 export const REPO_URL = 'https://github.com/CamarilloG/5e-jewelry-helper';
 export const HELP_URL = 'https://github.com/CamarilloG/5e-jewelry-helper#readme';
-const FILTER_SCHEMA_VERSION = 1;
 
 export interface ShellBridge {
   openExternal(url: string): Promise<void>;
@@ -559,8 +568,12 @@ export class AppController {
 
   private summarizeConditions(c: FilterConditions): string {
     const items = c.items
-      .filter((i) => i.categoryId || i.name)
-      .map((i) => [i.categoryId?.slice(2), i.name].filter(Boolean).join('+'));
+      .filter((i) => !conditionIsEmpty(i))
+      .map((i) =>
+        [i.categoryIds.map(categoryDisplay).join('/'), i.names.join('/')]
+          .filter(Boolean)
+          .join(' · '),
+      );
     const price =
       c.priceMin || c.priceMax
         ? `${c.priceMin ? `≥ ¥${c.priceMin}` : ''}${c.priceMin && c.priceMax ? ' ' : ''}${c.priceMax ? `≤ ¥${c.priceMax}` : ''}/${RENT_META[c.rentKind].unit}`
@@ -578,11 +591,27 @@ export class AppController {
   async filterPresets(): Promise<FilterPresetView[]> {
     const profileId = this.auth.profileId();
     if (!profileId) return [];
+    try {
+      await this.deps.db.call('filters.seedBuiltin', {
+        profileId,
+        presets: BUILTIN_FILTER_PRESETS.map((p) => ({
+          key: p.key,
+          id: crypto.randomUUID(),
+          name: p.name,
+          conditionsJson: JSON.stringify(p.conditions),
+        })),
+        schemaVersion: FILTER_SCHEMA_VERSION,
+        now: this.now(),
+      });
+    } catch (error) {
+      this.deps.logger.warn('filters.seed', { reason: (error as Error).name });
+    }
     const rows = await this.deps.db.call('filters.list', { profileId });
     const out: FilterPresetView[] = [];
     for (const row of rows) {
       try {
-        const conditions = JSON.parse(row.conditions_json) as FilterConditions;
+        const conditions = upgradeConditions(JSON.parse(row.conditions_json));
+        if (!conditions) continue;
         out.push({
           id: row.id,
           name: row.name,
@@ -841,7 +870,12 @@ export class AppController {
           profileId,
           id: crypto.randomUUID(),
           name: input.name,
-          conditionsJson: JSON.stringify(input.conditions),
+          conditionsJson: JSON.stringify({
+            ...input.conditions,
+            items: input.conditions.items
+              .map(cleanCondition)
+              .filter((i: ItemCondition) => !conditionIsEmpty(i)),
+          }),
           schemaVersion: FILTER_SCHEMA_VERSION,
           overwriteId: input.overwriteId,
           now: this.now(),

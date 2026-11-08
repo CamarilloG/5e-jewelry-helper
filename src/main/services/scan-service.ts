@@ -1,12 +1,13 @@
 // 筛选扫描（业务流程 §3）：IDLE → CANDIDATES → VERIFYING → COMPLETE，可 STOPPED / FAILED。
-// 每个非空条件选单个关键词取候选并按候选数从少到多补齐分页取交集；空交集立即结束；
+// 每个非空条件行取一组关键词（行内并集），按候选数从少到多补齐分页、行间取交集；空交集立即结束；
 // 加入本地已知账号；含饰品条件时逐个完整库存确认（同件匹配、行间交集、命中去重）。
 import Decimal from 'decimal.js';
+import { cleanCondition } from '../../shared/conditions';
 import type { FilterConditions, ScanResultView, ScanView } from '../../shared/dto';
 import { RENT_META, supportsRent } from '../../shared/rent';
 import {
   conditionIsEmpty,
-  conditionKeyword,
+  conditionKeywords,
   type ItemCondition,
   matchInventory,
 } from '../domain/matching';
@@ -73,10 +74,14 @@ export class ScanService {
     return `scan:${this.scanId}`;
   }
 
-  start(conditions: FilterConditions): ScanView {
+  start(input: FilterConditions): ScanView {
     this.halt();
     this.scanId += 1;
-    const items = conditions.items.filter((c) => !conditionIsEmpty(c));
+    const conditions: FilterConditions = {
+      ...input,
+      items: input.items.map(cleanCondition).filter((c) => !conditionIsEmpty(c)),
+    };
+    const items = conditions.items;
     this.view = {
       ...emptyView(this.scanId),
       phase: 'CANDIDATES',
@@ -229,62 +234,92 @@ export class ScanService {
   private async collectCandidates(token: number) {
     const c = this.view.conditions as FilterConditions;
     const rows: ItemCondition[] = c.items.filter((x) => !conditionIsEmpty(x));
-    const keywords = [...new Set(rows.map(conditionKeyword).filter((k): k is string => !!k))];
+    // 每行一组关键词（行内并集）；大类行没有关键词，不提供候选，只在库存确认时把关
+    const rowWords = rows
+      .map(conditionKeywords)
+      .filter((words): words is string[] => !!words && words.length > 0);
     const warnings: string[] = [];
     let candidateMap: Map<string, AccountRecord>;
     let complete = true;
-    if (keywords.length === 0) {
+    if (rowWords.length === 0) {
       if (rows.length > 0) {
         warnings.push(
-          '所选大类无法用单个关键词检索，将浏览该租期的全部账号并逐个确认库存，耗时较长。',
+          '所选条件只有大类，无法用关键词检索，将浏览该租期的全部账号并逐个确认库存，耗时较长。',
         );
       }
       const result = await this.fetchKeyword('', token);
       candidateMap = result.records;
       complete = result.complete;
     } else {
-      // 先取各关键词第一页，再按候选数从少到多补齐
-      const firsts: {
-        keyword: string;
-        first: { total: number; accounts: AccountRecord[] } | null;
-      }[] = [];
-      for (const keyword of keywords) {
-        if (!this.alive(token)) return;
-        try {
-          const first = await this.api.search(
-            { keyword, page: 1, rentKind: c.rentKind, couponOnly: c.couponOnly },
-            { priority: Priority.SCAN, group: this.group() },
-          );
-          firsts.push({ keyword, first });
-          if (first.total === 0 || first.accounts.length === 0) break;
-        } catch (error) {
-          if (isCancelled(error)) throw error;
-          if (error instanceof PlatformError && error.code === 'AUTH_EXPIRED') throw error;
-          firsts.push({ keyword, first: null });
-          complete = false;
+      // 1. 取每个关键词的第一页，得到各行候选规模
+      type First = { total: number; accounts: AccountRecord[] } | null;
+      const firsts = new Map<string, First>();
+      let zeroRow = false;
+      for (const words of rowWords) {
+        for (const keyword of words) {
+          if (firsts.has(keyword)) continue;
+          if (!this.alive(token)) return;
+          try {
+            const first = await this.api.search(
+              { keyword, page: 1, rentKind: c.rentKind, couponOnly: c.couponOnly },
+              { priority: Priority.SCAN, group: this.group() },
+            );
+            firsts.set(keyword, first);
+          } catch (error) {
+            if (isCancelled(error)) throw error;
+            if (error instanceof PlatformError && error.code === 'AUTH_EXPIRED') throw error;
+            firsts.set(keyword, null);
+            complete = false;
+          }
+        }
+        // 某行所有关键词都确定为 0 个账号：交集必为空，不再取其他行
+        if (words.every((w) => firsts.get(w)?.total === 0)) {
+          zeroRow = true;
+          break;
         }
       }
-      firsts.sort(
-        (a, b) =>
-          (a.first?.total ?? Number.MAX_SAFE_INTEGER) - (b.first?.total ?? Number.MAX_SAFE_INTEGER),
-      );
+      // 2. 按规模从小到大逐行补齐分页（行内并集、行间交集）；剩余分页比当前候选还多的行
+      //    不再翻页，交给完整库存确认把关（结果相同，请求更少）
+      const plans = rowWords
+        .filter((words) => words.every((w) => firsts.get(w)))
+        .map((words) => {
+          const totals = words.map((w) => firsts.get(w)?.total ?? 0);
+          const pages = words.reduce((sum, w) => {
+            const f = firsts.get(w);
+            if (!f || f.accounts.length === 0) return sum;
+            return sum + Math.max(0, Math.ceil(f.total / Math.max(1, f.accounts.length)) - 1);
+          }, 0);
+          return { words, size: totals.reduce((a, b) => a + b, 0), pages };
+        })
+        .sort((a, b) => a.size - b.size);
       let intersection: Map<string, AccountRecord> | null = null;
-      for (const entry of firsts) {
-        if (!this.alive(token)) return;
-        if (!entry.first) continue;
-        const result = await this.fetchKeyword(entry.keyword, token, entry.first);
-        if (!result.complete) complete = false;
-        if (intersection == null) {
-          intersection = result.records;
-        } else {
-          const next = new Map<string, AccountRecord>();
-          for (const [no, record] of intersection) if (result.records.has(no)) next.set(no, record);
-          intersection = next;
+      if (!zeroRow) {
+        const fetched = new Map<string, Map<string, AccountRecord>>();
+        for (const plan of plans) {
+          if (!this.alive(token)) return;
+          if (intersection != null && plan.pages >= intersection.size) continue;
+          const union = new Map<string, AccountRecord>();
+          for (const keyword of plan.words) {
+            let records = fetched.get(keyword);
+            if (!records) {
+              const first = firsts.get(keyword) ?? undefined;
+              const result = await this.fetchKeyword(keyword, token, first ?? undefined);
+              if (!this.alive(token)) return;
+              if (!result.complete) complete = false;
+              records = result.records;
+              fetched.set(keyword, records);
+            }
+            for (const [no, record] of records) union.set(no, record);
+          }
+          if (intersection == null) {
+            intersection = union;
+          } else {
+            const next = new Map<string, AccountRecord>();
+            for (const [no, record] of intersection) if (union.has(no)) next.set(no, record);
+            intersection = next;
+          }
+          if (intersection.size === 0) break;
         }
-        if (intersection.size === 0) break;
-      }
-      if (firsts.length < keywords.length && firsts.some((f) => f.first && f.first.total === 0)) {
-        intersection = new Map();
       }
       candidateMap = intersection ?? new Map();
     }
@@ -297,7 +332,7 @@ export class ScanService {
     const favorites = await this.localFavorites();
     const known = await this.accounts.knownAccounts();
     const local: Candidate[] = [];
-    const empty = keywords.length > 0 && candidateMap.size === 0 && complete;
+    const empty = rowWords.length > 0 && candidateMap.size === 0 && complete;
     for (const record of known) {
       if (seen.has(record.accountNo)) continue;
       if (!favorites.has(record.accountNo) && !record.statusKnown) continue;
