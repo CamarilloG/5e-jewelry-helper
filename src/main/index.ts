@@ -257,11 +257,13 @@ function createWindow() {
     }
     mainWindow?.hide();
     if (controller && !controller.deviceSettings().closeHintShown) {
-      tray?.displayBalloon({
-        title: '饰品驿站助手',
-        content: '已最小化到托盘，监测仍在运行',
-        iconType: 'info',
-      });
+      if (tray && !tray.isDestroyed()) {
+        tray.displayBalloon({
+          title: '饰品驿站助手',
+          content: '已最小化到托盘，监测仍在运行',
+          iconType: 'info',
+        });
+      }
       void controller.handle('app.firstCloseHintShown', undefined);
     }
   });
@@ -271,7 +273,7 @@ function createWindow() {
 
 let lastTray = '';
 function updateTray() {
-  if (!tray || !controller) return;
+  if (quitting || quitInProgress || !tray || tray.isDestroyed() || !controller) return;
   const status = controller.status();
   const m = status.monitor;
   const tone =
@@ -311,8 +313,9 @@ function createTray() {
 }
 
 function forwardEvent(event: MainEvent) {
+  if (quitting || quitInProgress) return;
   if (event.type === 'status') updateTray();
-  if (mainWindow && !mainWindow.isDestroyed())
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed())
     mainWindow.webContents.send(`event:${event.type}`, event.payload);
 }
 
@@ -366,7 +369,10 @@ async function doQuit() {
     // 忽略
   }
   quitting = true;
-  tray?.destroy();
+  if (tray && !tray.isDestroyed()) {
+    tray.destroy();
+  }
+  tray = null;
   app.quit();
 }
 

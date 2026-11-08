@@ -206,4 +206,28 @@ describe('通知 XML、图片来源与 CSP', () => {
     expect(csp).not.toMatch(/unsafe-eval|script-src[^;]*unsafe-inline|script-src[^;]*https?:/);
     expect(csp).toContain("object-src 'none'");
   });
+  it('shutdown 清理待触发定时器且退出后不再向已销毁的 Tray/窗口发射事件', async () => {
+    const h = await createHarness();
+    try {
+      await h.controller.handle('scan.start', {
+        conditions: {
+          items: [{ categoryIds: ['w:蝴蝶刀'], names: [] }],
+          rentKind: 'HOUR',
+          priceMin: null,
+          priceMax: null,
+          couponOnly: false,
+        },
+        presetId: null,
+      });
+      let emittedAfterShutdown = 0;
+      h.controller.subscribe(() => {
+        emittedAfterShutdown += 1;
+      });
+      await h.controller.shutdown();
+      await new Promise((r) => setTimeout(r, 250));
+      expect(emittedAfterShutdown).toBe(0);
+    } finally {
+      await h.close();
+    }
+  });
 });

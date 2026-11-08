@@ -119,6 +119,7 @@ export class AppController {
   >();
   private readonly now: () => number;
   private started = false;
+  private shuttingDown = false;
   private handlers: { [C in IpcChannel]: Handler<C> };
 
   constructor(private readonly deps: ControllerDeps) {
@@ -232,22 +233,25 @@ export class AppController {
   }
 
   private emit(event: MainEvent) {
+    if (this.shuttingDown) return;
     for (const l of this.listeners) l(event);
   }
 
   private emitStatus() {
-    if (this.statusTimer) return;
+    if (this.shuttingDown || this.statusTimer) return;
     this.statusTimer = setTimeout(() => {
       this.statusTimer = null;
+      if (this.shuttingDown) return;
       this.emit({ type: 'status', payload: this.status() });
     }, 150);
   }
 
   private favoritesTimer: ReturnType<typeof setTimeout> | null = null;
   private emitFavorites() {
-    if (this.favoritesTimer) return;
+    if (this.shuttingDown || this.favoritesTimer) return;
     this.favoritesTimer = setTimeout(() => {
       this.favoritesTimer = null;
+      if (this.shuttingDown) return;
       void this.favorites
         .view({ triggerBackfill: false })
         .then((payload) => this.emit({ type: 'favorites', payload }));
@@ -359,12 +363,30 @@ export class AppController {
   }
 
   async shutdown() {
+    this.shuttingDown = true;
+    if (this.statusTimer) {
+      clearTimeout(this.statusTimer);
+      this.statusTimer = null;
+    }
+    if (this.favoritesTimer) {
+      clearTimeout(this.favoritesTimer);
+      this.favoritesTimer = null;
+    }
     await this.checkout.prepareQuit();
     this.favorites.pauseBackfill();
     this.monitor.halt();
     this.scan.interrupt('退出');
     this.queue.cancelGroup('favorites:backfill');
     this.queue.pause('退出');
+    if (this.statusTimer) {
+      clearTimeout(this.statusTimer);
+      this.statusTimer = null;
+    }
+    if (this.favoritesTimer) {
+      clearTimeout(this.favoritesTimer);
+      this.favoritesTimer = null;
+    }
+    this.listeners.clear();
   }
 
   // ---------- 状态 ----------

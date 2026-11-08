@@ -476,6 +476,10 @@ export class ScanService {
   private halt() {
     this.token += 1;
     this.api.queue.cancelGroup(this.group());
+    if (this.emitTimer) {
+      clearTimeout(this.emitTimer);
+      this.emitTimer = null;
+    }
   }
 
   private alive(token: number) {
