@@ -597,7 +597,7 @@ export class FakePlatform implements HttpTransport {
         return ok({ items: this.channels }, now);
       case '/rent/order/check_account_lock':
         this.lockChecks++;
-        if (!acc || acc.rentStatus !== 0 || acc.shelfStatus !== 1)
+        if (acc?.rentStatus !== 0 || acc?.shelfStatus !== 1)
           return fail(400, '账号已被他人锁定', now);
         return ok({}, now);
       case '/rent/order/create': {
