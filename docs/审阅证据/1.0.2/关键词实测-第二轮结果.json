@@ -1,0 +1,129 @@
+{
+  "searches": [
+    {
+      "keyword": "AK",
+      "total": "1827",
+      "page1": 100,
+      "page1_display_contains_kw": 76,
+      "matched_prefixes_in_display": {
+        "AK-47": 86
+      }
+    },
+    {
+      "keyword": "USP",
+      "total": "188",
+      "page1": 100,
+      "page1_display_contains_kw": 26,
+      "matched_prefixes_in_display": {
+        "USP消音版": 28
+      }
+    },
+    {
+      "keyword": "USP消音版",
+      "total": "187",
+      "page1": 100,
+      "page1_display_contains_kw": 26,
+      "matched_prefixes_in_display": {
+        "USP消音版": 28
+      }
+    },
+    {
+      "keyword": "553",
+      "total": "643",
+      "page1": 100,
+      "page1_display_contains_kw": 1,
+      "matched_prefixes_in_display": {
+        "SG553": 1
+      }
+    },
+    {
+      "keyword": "SG553",
+      "total": "654",
+      "page1": 100,
+      "page1_display_contains_kw": 1,
+      "matched_prefixes_in_display": {
+        "SG553": 1
+      }
+    },
+    {
+      "keyword": "SSG",
+      "total": "779",
+      "page1": 100,
+      "page1_display_contains_kw": 4,
+      "matched_prefixes_in_display": {
+        "SSG08": 4
+      }
+    },
+    {
+      "keyword": "SSG08",
+      "total": "779",
+      "page1": 100,
+      "page1_display_contains_kw": 4,
+      "matched_prefixes_in_display": {
+        "SSG08": 4
+      }
+    },
+    {
+      "keyword": "加利尔",
+      "total": "0",
+      "page1": 0,
+      "page1_display_contains_kw": 0,
+      "matched_prefixes_in_display": {}
+    },
+    {
+      "keyword": "加利尔AR",
+      "total": "26",
+      "page1": 26,
+      "page1_display_contains_kw": 0,
+      "matched_prefixes_in_display": {}
+    },
+    {
+      "keyword": "CZ75",
+      "total": "11",
+      "page1": 11,
+      "page1_display_contains_kw": 0,
+      "matched_prefixes_in_display": {}
+    },
+    {
+      "keyword": "CZ75自动手枪",
+      "total": "0",
+      "page1": 0,
+      "page1_display_contains_kw": 0,
+      "matched_prefixes_in_display": {}
+    },
+    {
+      "keyword": "R8",
+      "total": "10",
+      "page1": 10,
+      "page1_display_contains_kw": 0,
+      "matched_prefixes_in_display": {}
+    },
+    {
+      "keyword": "R8左轮手枪",
+      "total": "10",
+      "page1": 10,
+      "page1_display_contains_kw": 0,
+      "matched_prefixes_in_display": {}
+    },
+    {
+      "keyword": "裹手",
+      "total": "240",
+      "page1": 100,
+      "page1_display_contains_kw": 65,
+      "matched_prefixes_in_display": {
+        "裹手": 65
+      }
+    },
+    {
+      "keyword": "锯齿爪刀",
+      "total": "151",
+      "page1": 100,
+      "page1_display_contains_kw": 89,
+      "matched_prefixes_in_display": {
+        "锯齿爪刀": 89
+      }
+    }
+  ],
+  "inventory_checks": [],
+  "requests": 15
+}
