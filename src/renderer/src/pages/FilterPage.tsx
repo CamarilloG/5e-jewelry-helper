@@ -28,6 +28,7 @@ import {
 import {
   type FilterPresetView,
   partitionResultsForFilter,
+  resultDisplayItems,
   type ScanResultView,
   type SortKey,
   type StatusFilter,
@@ -49,6 +50,9 @@ import {
 } from '../store';
 
 const PRICE_RE = /^\d{0,7}(\.\d{0,2})?$/;
+
+const CARD_ITEM_SLOTS = 4;
+const LIST_ITEM_SLOTS = 3;
 
 export { partitionResultsForFilter, type SortKey, type StatusFilter, sortResultList };
 
@@ -789,6 +793,11 @@ function priceLine(result: ScanResultView, kind: (typeof RENT_KINDS)[number]) {
   return p?.price ? `${formatYuan(p.price, { compact: false })}/${RENT_META[kind].unit}` : '—';
 }
 
+/** 补位来源：优先完整库存选出的饰品，未读库存时退回平台展示位。 */
+function fillCandidates(result: ScanResultView) {
+  return result.fillItems?.length ? result.fillItems : result.account.displayItems;
+}
+
 function openDrawer(result: ScanResultView, focusInventory = false) {
   useUi.setState({
     drawer: {
@@ -805,8 +814,9 @@ function ResultCard({ result }: { result: ScanResultView }) {
   const a = result.account;
   const current = a.prices.find((p) => p.kind === kind);
   const others = a.prices.filter((p) => p.kind !== kind && p.supported);
-  const shown = result.hitItems.length > 0 ? result.hitItems : a.displayItems.slice(0, 4);
-  const more = result.hitCount != null ? Math.max(0, result.hitCount - shown.length) : 0;
+  const shown = resultDisplayItems(result.hitItems, fillCandidates(result), CARD_ITEM_SLOTS);
+  const hitKeys = new Set(result.hitItems.map((i) => i.key));
+  const more = result.hitCount != null ? Math.max(0, result.hitCount - hitKeys.size) : 0;
   const isSearchEvidence = result.evidence === 'search' || result.hitCount === null;
 
   return (
@@ -838,24 +848,24 @@ function ResultCard({ result }: { result: ScanResultView }) {
       </Tooltip>
       <div className="jh-card-items">
         {shown.map((item) => (
-          <ItemCard key={item.key} item={item} hit={result.hitItems.length > 0} compact />
+          <ItemCard key={item.key} item={item} hit={hitKeys.has(item.key)} compact />
         ))}
-        {more > 0 ? (
-          <Button
-            size="small"
-            type="link"
-            onClick={(e) => {
-              e.stopPropagation();
-              openDrawer(result, true);
-            }}
-          >
-            +{more}
-          </Button>
-        ) : null}
       </div>
       {scan?.hasItemConditions ? (
         <div className="jh-small">
           {isSearchEvidence ? '类别条件匹配，库存详情按需加载' : `命中 ${result.hitCount} 件`}
+          {more > 0 ? (
+            <Button
+              size="small"
+              type="link"
+              onClick={(e) => {
+                e.stopPropagation();
+                openDrawer(result, true);
+              }}
+            >
+              +{more}
+            </Button>
+          ) : null}
         </div>
       ) : null}
       <div className="jh-card-foot">
@@ -904,8 +914,9 @@ function ResultList({ results, hasItems }: { results: ScanResultView[]; hasItems
         getKey={(r) => r.account.accountNo}
         ariaLabel="结果列表"
         render={(r) => {
-          const shown =
-            r.hitItems.length > 0 ? r.hitItems.slice(0, 3) : r.account.displayItems.slice(0, 3);
+          const shown = resultDisplayItems(r.hitItems, fillCandidates(r), LIST_ITEM_SLOTS);
+          const hitKeys = new Set(r.hitItems.map((i) => i.key));
+          const shownHits = shown.filter((i) => hitKeys.has(i.key)).length;
           const isSearchEvidence = r.evidence === 'search' || r.hitCount === null;
           return (
             // biome-ignore lint/a11y/useSemanticElements: 行内含收藏按钮，不能嵌套在 <button> 中
@@ -923,10 +934,10 @@ function ResultList({ results, hasItems }: { results: ScanResultView[]; hasItems
               <StatusBadge status={r.account.status} />
               <span className="jh-list-items">
                 {shown.map((i) => (
-                  <ItemCard key={i.key} item={i} compact hit={r.hitItems.length > 0} />
+                  <ItemCard key={i.key} item={i} compact hit={hitKeys.has(i.key)} />
                 ))}
-                {r.hitCount != null && r.hitCount > shown.length ? (
-                  <span className="jh-small">+{r.hitCount - shown.length}</span>
+                {r.hitCount != null && r.hitCount > shownHits ? (
+                  <span className="jh-small">+{r.hitCount - shownHits}</span>
                 ) : null}
               </span>
               {hasItems ? (

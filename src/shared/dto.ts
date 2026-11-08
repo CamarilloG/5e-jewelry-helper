@@ -122,6 +122,8 @@ export interface ScanResultView {
   /** 库存确认路径为去重命中件数；搜索证据快速路径未读库存时为 null（“未计算”） */
   score: number | null;
   hitItems: ItemView[];
+  /** 已读完整库存时，未命中饰品按估价从高到低的前几件，用于填满卡片饰品位 */
+  fillItems?: ItemView[];
   /** 库存确认路径为去重命中件数；搜索证据快速路径未读库存时为 null（“未计算”） */
   hitCount: number | null;
   favorite: boolean;
@@ -396,6 +398,25 @@ export function sortResultList(
  * A5（R05）：在默认“仅可租”视图下，将状态待确认（UNKNOWN 或离线历史 stale）的结果分入独立的
  * “已匹配，状态待确认”分组；状态确认后自动移入对应状态分组，“当前可租”只统计已确认可租项。
  */
+/** 结果卡片/列表的饰品位：命中饰品优先，空位用补位候选按估价从高到低补齐。 */
+export function resultDisplayItems(
+  hitItems: readonly ItemView[],
+  fillCandidates: readonly ItemView[],
+  limit: number,
+): ItemView[] {
+  const shown = hitItems.slice(0, limit);
+  const used = new Set(shown.map((item) => item.key));
+  const fill = fillCandidates
+    .filter((item) => !used.has(item.key))
+    .sort(
+      (a, b) =>
+        // 与 null 比较时有效估价得 -1、缺失得 0，保证缺失估价排在最后
+        compareDecimalText(a.price, null) - compareDecimalText(b.price, null) ||
+        compareDecimalText(b.price, a.price),
+    );
+  return [...shown, ...fill.slice(0, Math.max(0, limit - shown.length))];
+}
+
 export function partitionResultsForFilter(
   allResults: ScanResultView[],
   sort: SortKey,

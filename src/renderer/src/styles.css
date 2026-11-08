@@ -398,11 +398,11 @@ body.jh-resizing {
   flex-wrap: wrap;
 }
 .jh-card-items {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
   align-items: center;
-  flex-wrap: wrap;
-  min-height: 64px;
+  min-height: 52px;
 }
 .jh-card-foot {
   display: flex;
@@ -548,6 +548,11 @@ body.jh-resizing {
   border: 1px dashed #d1d5db;
 }
 
+.jh-card-items .jh-item-compact {
+  width: auto;
+  min-width: 0;
+}
+
 /* P2 抽屉 */
 .jh-drawer .ant-drawer-body {
   position: relative;
@@ -558,11 +563,20 @@ body.jh-resizing {
   top: 0;
   bottom: 0;
   width: 6px;
+  padding: 0;
+  border: 0;
+  appearance: none;
+  background: transparent;
   cursor: ew-resize;
   z-index: 5;
+  transition: background 0.15s;
 }
-.jh-drawer-handle:hover {
-  background: rgba(79, 70, 229, 0.15);
+/* 平时不可见，悬停、拖动或键盘聚焦时才显示调整宽度的提示 */
+.jh-drawer-handle:hover,
+.jh-drawer-handle:focus-visible,
+body.jh-resizing .jh-drawer-handle {
+  background: rgba(79, 70, 229, 0.35);
+  outline: none;
 }
 .jh-detail-head {
   position: sticky;
@@ -610,6 +624,48 @@ body.jh-resizing {
 }
 .jh-price-cell.jh-disabled {
   color: #9ca3af;
+}
+.jh-cat-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.jh-cat-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--jh-border);
+  border-radius: 6px;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+  color: var(--jh-text);
+  cursor: pointer;
+}
+.jh-cat-tab .jh-num {
+  color: var(--jh-muted);
+}
+.jh-cat-tab:hover {
+  border-color: #c7c4f7;
+}
+.jh-cat-tab.active {
+  background: #e8e7fc;
+  border-color: var(--jh-primary);
+  color: var(--jh-primary);
+  font-weight: 600;
+}
+.jh-cat-tab.active .jh-num {
+  color: var(--jh-primary);
+}
+.jh-cat-tab:focus-visible {
+  outline: 2px solid var(--jh-primary);
+  outline-offset: 1px;
 }
 .jh-inline-error {
   color: var(--jh-risk);
@@ -846,10 +902,44 @@ body.jh-resizing {
   grid-template-columns: 160px 1fr;
   min-height: 0;
 }
-.jh-settings-anchor {
-  padding: 16px 8px;
+.jh-settings-nav {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 10px;
   border-right: 1px solid var(--jh-border);
-  background: var(--jh-zone);
+  background: #fff;
+}
+.jh-settings-nav .jh-settings-anchor {
+  margin: 0;
+  padding: 0;
+}
+.jh-settings-nav .ant-anchor::before,
+.jh-settings-nav .jh-settings-anchor.ant-anchor-wrapper .ant-anchor .ant-anchor-ink {
+  display: none;
+}
+.jh-settings-nav .ant-anchor .ant-anchor-link {
+  padding: 0;
+  margin-bottom: 2px;
+}
+.jh-settings-nav .ant-anchor .ant-anchor-link-title {
+  display: block;
+  padding: 7px 10px;
+  border-radius: 6px;
+  color: var(--jh-text);
+}
+.jh-settings-nav .ant-anchor .ant-anchor-link-title:hover {
+  background: #eceefa;
+  color: var(--jh-text);
+}
+.jh-settings-nav .ant-anchor .ant-anchor-link-title-active,
+.jh-settings-nav .ant-anchor .ant-anchor-link-title-active:hover {
+  background: #e8e7fc;
+  color: var(--jh-primary);
+  font-weight: 600;
+}
+.jh-settings-nav .ant-anchor .ant-anchor-link-title:focus-visible {
+  outline: 2px solid var(--jh-primary);
+  outline-offset: 1px;
 }
 .jh-settings-body {
   overflow: auto;

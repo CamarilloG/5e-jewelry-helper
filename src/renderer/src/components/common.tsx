@@ -138,6 +138,7 @@ export function ItemCard({
             fallback={item.fallbackImage}
             alt={item.name}
             size={compact ? { w: 56, h: 42 } : { w: 112, h: 84 }}
+            style={compact ? { width: '100%', height: 'auto', aspectRatio: '4 / 3' } : undefined}
           />
         </div>
       </Tooltip>

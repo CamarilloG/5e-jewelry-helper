@@ -70,15 +70,23 @@ export function SettingsPage() {
   const preset = settings.profile?.defaultPreset;
   return (
     <div className="jh-settings">
-      <Anchor
-        className="jh-settings-anchor"
-        getContainer={() => container.current ?? window}
-        items={SECTIONS.map((s) => ({ key: s.key, href: `#settings-${s.key}`, title: s.title }))}
-        onClick={(e, link) => {
-          e.preventDefault();
-          document.getElementById(link.href.slice(1))?.scrollIntoView({ block: 'start' });
-        }}
-      />
+      <nav className="jh-settings-nav" aria-label="设置分组">
+        <Anchor
+          affix={false}
+          bounds={24}
+          className="jh-settings-anchor"
+          getContainer={() => container.current ?? window}
+          items={SECTIONS.map((s) => ({
+            key: s.key,
+            href: `#settings-${s.key}`,
+            title: s.title,
+          }))}
+          onClick={(e, link) => {
+            e.preventDefault();
+            document.getElementById(link.href.slice(1))?.scrollIntoView({ block: 'start' });
+          }}
+        />
+      </nav>
       <div className="jh-settings-body" ref={container}>
         <Group id="auth" title="登录态">
           <Row label="当前状态">

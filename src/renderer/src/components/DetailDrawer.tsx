@@ -14,6 +14,7 @@ import {
   Tooltip,
 } from 'antd';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { inventoryCategoryKey, inventoryCategoryTabs } from '../../../shared/catalog';
 import type { DetailView, InventoryView } from '../../../shared/dto';
 import { compareDecimalText, formatYuan } from '../../../shared/money';
 import { formatSlotWindow, formatWeekdays, RENT_META, SLOT_WINDOWS } from '../../../shared/rent';
@@ -250,6 +251,7 @@ function Inventory({ accountNo, hitKeys }: { accountNo: string; hitKeys: string[
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<'ALL' | 'HIT'>('ALL');
   const [sort, setSort] = useState<InvSort>('PRICE');
+  const [category, setCategory] = useState('ALL');
   const load = useCallback(
     (refresh: boolean) => {
       setError(null);
@@ -261,10 +263,18 @@ function Inventory({ accountNo, hitKeys }: { accountNo: string; hitKeys: string[
   );
   useEffect(() => load(false), [load]);
   const hits = useMemo(() => new Set(hitKeys ?? []), [hitKeys]);
-  const items = useMemo(() => {
+  const scoped = useMemo(() => {
     if (!inv) return [];
-    let list = [...inv.items];
-    if (mode === 'HIT') list = list.filter((i) => hits.has(i.key));
+    return mode === 'HIT' ? inv.items.filter((i) => hits.has(i.key)) : inv.items;
+  }, [inv, mode, hits]);
+  const tabs = useMemo(() => inventoryCategoryTabs(scoped), [scoped]);
+  // 切到「仅命中」后原类别可能不存在，此时回到「全部」
+  const activeCategory = tabs.some((t) => t.key === category) ? category : 'ALL';
+  const items = useMemo(() => {
+    const list =
+      activeCategory === 'ALL'
+        ? [...scoped]
+        : scoped.filter((i) => inventoryCategoryKey(i.firstType) === activeCategory);
     list.sort((a, b) => {
       if (sort === 'NAME') return a.name.localeCompare(b.name, 'zh-CN');
       if (sort === 'RARITY')
@@ -277,7 +287,7 @@ function Inventory({ accountNo, hitKeys }: { accountNo: string; hitKeys: string[
     if (hitKeys && mode === 'ALL')
       list.sort((a, b) => Number(hits.has(b.key)) - Number(hits.has(a.key)));
     return list;
-  }, [inv, mode, sort, hits, hitKeys]);
+  }, [scoped, activeCategory, mode, sort, hits, hitKeys]);
   return (
     <section className="jh-pad jh-section">
       <div className="jh-section-title jh-row-between">
@@ -308,6 +318,22 @@ function Inventory({ accountNo, hitKeys }: { accountNo: string; hitKeys: string[
           />
         </Space>
       </div>
+      {tabs.length > 1 ? (
+        <fieldset className="jh-cat-tabs" aria-label="库存分类">
+          {[{ key: 'ALL', label: '全部', count: scoped.length }, ...tabs].map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              className={`jh-cat-tab ${activeCategory === t.key ? 'active' : ''}`}
+              aria-pressed={activeCategory === t.key}
+              onClick={() => setCategory(t.key)}
+            >
+              {t.label}
+              <span className="jh-num">{t.count}</span>
+            </button>
+          ))}
+        </fieldset>
+      ) : null}
       {error ? (
         <div className="jh-inline-error">
           库存加载失败 ·{' '}
