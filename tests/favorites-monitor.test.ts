@@ -272,3 +272,91 @@ describe('通知动作与 nonce', () => {
     expect(parseActivation(null)).toBeNull();
   });
 });
+
+describe('1.0.2 收藏 3×3 宫格与后台补读（R13）', () => {
+  it('C4 & C5：后台补读一次完整库存生成 9 图宫格；重复读取不重取；下一轮普通同步不覆盖宫格', async () => {
+    const h = await setup([0]);
+    const accNo = h.fake.favorites[0] as string;
+    const acc = h.fake.account(accNo);
+    if (!acc) throw new Error('missing account');
+    // 确保该账号有 9 件以上不同饰品
+    while (acc.inventory.length < 10) {
+      acc.inventory.push({
+        marketName: `AK-47 | 测试皮肤${acc.inventory.length} (崭新出厂)`,
+        firstType: '步枪',
+        price: String(100 + acc.inventory.length),
+        rarity: 5,
+        rarityName: '隐秘',
+        nameColor: 'eb4b4b',
+        exteriorName: '崭新出厂',
+        wear: '0.01',
+      });
+    }
+
+    await h.controller.favorites.sync();
+    // 刚同步完、尚未触发后台补读时，最多只有 5 件展示位
+    const before = (await h.controller.favorites.view({ triggerBackfill: false })).items[0];
+    expect(before?.summarySource).toBe('display');
+    expect((before?.gridItems?.length ?? 0) <= 5).toBe(true);
+
+    // 打开收藏页（triggerBackfill = true）触发后台补读
+    await h.controller.handle('favorites.state', undefined);
+    await waitFor(
+      async () =>
+        (await h.controller.favorites.view({ triggerBackfill: false })).items[0]?.summarySource ===
+        'inventory',
+    );
+    const after = (await h.controller.favorites.view({ triggerBackfill: false })).items[0];
+    expect(after?.gridItems).toHaveLength(9);
+    expect(h.fake.count('/rent/account/inventory/display/info')).toBe(1);
+
+    // 重复打开收藏页不会重复发送后台库存请求
+    await h.controller.handle('favorites.state', undefined);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(h.fake.count('/rent/account/inventory/display/info')).toBe(1);
+
+    // C4：下一轮普通收藏同步或监测轮次不会用 5 件展示位覆盖已生成的 9 图完整宫格
+    await h.controller.favorites.sync();
+    await h.controller.monitor.runRound();
+    const afterSync = (await h.controller.favorites.view({ triggerBackfill: false })).items[0];
+    expect(afterSync?.summarySource).toBe('inventory');
+    expect(afterSync?.gridItems).toHaveLength(9);
+    await h.close();
+  });
+
+  it('C5：支付出码进行中暂停后台补读（Priority.BACKGROUND 与 Priority.SCAN 一并阻塞）', async () => {
+    const h = await setup([0, 1]);
+    const payAccNo = h.fake.accounts[2]?.accountNo as string;
+    const payAcc = h.fake.account(payAccNo);
+    if (payAcc) {
+      payAcc.shelfStatus = 1;
+      payAcc.rentStatus = 0;
+      payAcc.rentPeriod = 1;
+    }
+
+    await h.controller.favorites.sync();
+    await h.controller.handle('agreement.accept', { version: '2026-11-07' });
+
+    // 启动一笔出码，使 checkout 进入 PENDING（blocksScan = true）
+    const co = await h.controller.handle('checkout.start', {
+      accountNo: payAccNo,
+      params: { rentKind: 'HOUR', quantity: 2, payChannel: 1, autoCoupon: false },
+      source: 'DETAIL',
+      expectedAmountYuan: null,
+    });
+    expect(co.kind).toBe('STARTED');
+    await waitFor(() => h.controller.checkout.view()?.state === 'PENDING');
+
+    const invBefore = h.fake.count('/rent/account/inventory/display/info');
+    // 出码进行中打开收藏页：后台补读被阻塞，不发送库存请求
+    await h.controller.handle('favorites.state', undefined);
+    await new Promise((r) => setTimeout(r, 40));
+    expect(h.fake.count('/rent/account/inventory/display/info')).toBe(invBefore);
+
+    // 出码结束后（如完成支付或结束），自动恢复后台补读
+    h.fake.pay();
+    await waitFor(() => h.controller.checkout.view()?.state === 'PAID');
+    await waitFor(() => h.fake.count('/rent/account/inventory/display/info') > invBefore);
+    await h.close();
+  });
+});
