@@ -449,7 +449,12 @@ describe('1.0.2 关键词证据、条件指纹、TTL 迁移、收藏宫格与状
   it('A1 (R02)：三类独立证据、格洛克18型/加利尔AR 修正、宽词与未认证词不进入快速路径、支持降级', () => {
     const glock = CATEGORY_BY_ID.get('w:格洛克 18 型');
     expect(glock?.keyword).toBe('格洛克18型');
-    expect(categorySupportsFastPath('w:格洛克 18 型')).toBe(true);
+    // 实测：精确性已认证，但带空格命名漏召回（15 个持有账号仅召回 4 个），覆盖不完整
+    expect(getCategoryEvidence('w:格洛克 18 型')?.precision).toBe('verified');
+    expect(getCategoryEvidence('w:格洛克 18 型')?.coverage).toBe('partial');
+    expect(categorySupportsFastPath('w:格洛克 18 型')).toBe(false);
+    const plannedGlock = planConditionRows([{ categoryIds: ['w:格洛克 18 型'], names: [] }]);
+    expect(plannedGlock[0]?.coverageVerified).toBe(false);
 
     const galil = CATEGORY_BY_ID.get('w:加利尔 AR');
     expect(galil?.keyword).toBe('加利尔AR');

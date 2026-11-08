@@ -1153,6 +1153,63 @@ export class ScanService {
     return false;
   }
 
+  /** 当前租期全部账号数（空关键词第 1 页的 total），用于估算一行搜索能排除多少候选；失败时返回 null。 */
+  private async fetchUniverseTotal(token: number): Promise<number | null> {
+    try {
+      const res = await this.fetchSearchPage('', 1, token);
+      if (!this.alive(token)) return null;
+      return res.total > 0 ? res.total : null;
+    } catch (error) {
+      if (isCancelled(error)) throw error;
+      if (error instanceof PlatformError && error.code === 'AUTH_EXPIRED') throw error;
+      return null;
+    }
+  }
+
+  /**
+   * 候选阶段提前确认（A5 R05）：已在所有来源行的已取分页中出现的账号一定会进入最终候选，
+   * 立即逐个确认，不必等全部翻页结束。已全部走搜索证据快速路径时卡片已即时输出，无需提前确认。
+   */
+  private async verifyGuaranteedCandidates(token: number, sourceRowIndices: number[]) {
+    // 单个来源行时由 verifyFirstReadyFromPage 负责首条结果，不在此提前确认
+    if (sourceRowIndices.length < 2) return;
+    const allFastPath =
+      this.plannedRows.every((r) => r.fastPathEligible) && this.rowDelegated.size === 0;
+    if (allFastPath) return;
+    const c = this.view.conditions as FilterConditions;
+    const ready: AccountRecord[] = [];
+    for (const [no, hits] of this.accountRowHits) {
+      if (this.earlyVerified.has(no)) continue;
+      if (!sourceRowIndices.every((i) => hits.has(i))) continue;
+      const record = this.discoveredRecords.get(no);
+      if (record && fitsBasics(record, c)) ready.push(record);
+    }
+    if (ready.length === 0) return;
+    const favorites = await this.localFavorites();
+    for (const record of ready) {
+      if (!this.alive(token)) return;
+      try {
+        await this.processCandidate(
+          { accountNo: record.accountNo, record, origin: 'platform', searchMatchedAllRows: false },
+          token,
+          favorites,
+        );
+      } catch (error) {
+        if (isCancelled(error) || !this.alive(token)) throw error;
+        if (error instanceof PlatformError && error.code === 'AUTH_EXPIRED') throw error;
+        continue; // 失败的留给逐个确认阶段按常规重试与计数
+      }
+      if (!this.alive(token)) return;
+      this.earlyVerified.add(record.accountNo);
+      if (!this.firstResultFlushed && this.view.results.length > 0) {
+        this.firstResultFlushed = true;
+        this.flush();
+      } else {
+        this.emitThrottled();
+      }
+    }
+  }
+
   private async collectCandidates(token: number) {
     const c = this.view.conditions as FilterConditions;
     const rows: ItemCondition[] = c.items.filter((x) => !conditionIsEmpty(x));
@@ -1197,9 +1254,19 @@ export class ScanService {
       return;
     }
 
+    // A4（R06）：只有覆盖已认证的行才能作为候选来源与求交依据；覆盖不完整（如格洛克18型、加利尔AR）
+    // 或无法用关键词检索的行一律委托给完整库存确认，绝不用其搜索集合排除账号
+    for (const r of this.plannedRows) {
+      if (!r.coverageVerified) this.rowDelegated.add(r.index);
+    }
     const activeRowPlans = this.plannedRows.filter(
-      (r) => r.keywords && r.keywords.length > 0 && !this.rowDelegated.has(r.index),
+      (r) =>
+        r.coverageVerified &&
+        r.keywords &&
+        r.keywords.length > 0 &&
+        !this.rowDelegated.has(r.index),
     );
+    const sourceRowIndices = activeRowPlans.map((r) => r.index);
 
     let candidateMap = new Map<string, AccountRecord>();
     let platformZeroRow = false;
@@ -1207,8 +1274,11 @@ export class ScanService {
 
     if (activeRowPlans.length === 0) {
       if (rows.length > 0) {
+        const partialOnly = this.plannedRows.some((r) => r.keywords.length > 0);
         warnings.push(
-          '所选条件只有大类，无法用关键词检索，将浏览该租期的全部账号并逐个确认库存，耗时较长。',
+          partialOnly
+            ? '所选条件的平台搜索覆盖不完整，将浏览该租期的全部账号并逐个确认库存，耗时较长。'
+            : '所选条件只有大类，无法用关键词检索，将浏览该租期的全部账号并逐个确认库存，耗时较长。',
         );
       }
       const st = await this.fetchKeywordRemainingPages('', token, rows.length === 1 ? 0 : null);
@@ -1308,13 +1378,31 @@ export class ScanService {
             })
             .sort((a, b) => a.size - b.size);
 
+          // 候选阶段提前确认：各来源行第 1 页都出现的账号必然留在最终交集里，先核验它们以尽早出结果
+          await this.verifyGuaranteedCandidates(token, sourceRowIndices);
+          if (!this.alive(token)) return;
+
           let intersection: Map<string, AccountRecord> | null = null;
+          let universe: number | null | undefined;
           for (const plan of plans) {
             if (!this.alive(token)) return;
-            // A4（R06）：若当前候选数已经少于或等于该行剩余需要翻取的分页数，不再翻页，交给完整库存确认把关
-            if (intersection != null && plan.pages > 0 && plan.pages >= intersection.size) {
-              this.rowDelegated.add(plan.rowIndex);
-              continue;
+            // A4（R06）按请求成本规划：翻完该行还需 plan.pages 次搜索；不翻则交集中预计多留下的账号
+            // 各需 1 次库存确认。预计节省的确认数不超过翻页数时不再翻页，交给完整库存确认把关。
+            if (intersection != null && plan.pages > 0) {
+              const fastStill =
+                this.plannedRows.every((r) => r.fastPathEligible) && this.rowDelegated.size === 0;
+              let benefit = intersection.size;
+              if (!fastStill) {
+                if (universe === undefined) universe = await this.fetchUniverseTotal(token);
+                if (!this.alive(token)) return;
+                if (universe != null && universe > 0) {
+                  benefit = intersection.size * Math.max(0, 1 - plan.size / universe);
+                }
+              }
+              if (plan.pages >= benefit) {
+                this.rowDelegated.add(plan.rowIndex);
+                continue;
+              }
             }
 
             const union = new Map<string, AccountRecord>();
@@ -1341,6 +1429,8 @@ export class ScanService {
             }
 
             if (intersection.size === 0 && rowComplete) break;
+            await this.verifyGuaranteedCandidates(token, sourceRowIndices);
+            if (!this.alive(token)) return;
           }
           candidateMap = intersection ?? new Map();
         }
@@ -1363,8 +1453,11 @@ export class ScanService {
       this.plannedRows.every((r) => r.fastPathEligible) &&
       this.rowDelegated.size === 0;
 
+    // 命中来源行越多的账号越可能满足全部条件，优先确认以尽早出结果
+    const hitsOf = (no: string) => this.accountRowHits.get(no)?.size ?? 0;
     const platform: Candidate[] = [...candidateMap.values()]
       .filter((r) => fitsBasics(r, c))
+      .sort((a, b) => hitsOf(b.accountNo) - hitsOf(a.accountNo))
       .map((record) => ({
         accountNo: record.accountNo,
         record,
@@ -1479,10 +1572,136 @@ export class ScanService {
     this.flush();
   }
 
-  private async verify(token: number) {
+  /** 核验单个候选（完整库存或搜索证据快速路径 + 状态详情），供逐个确认与候选阶段提前确认共用。 */
+  private async processCandidate(cand: Candidate, token: number, favorites: Set<string>) {
     const c = this.view.conditions as FilterConditions;
     const rows = c.items.filter((x) => !conditionIsEmpty(x));
     const itemMode = rows.length > 0;
+    if (this.earlyVerified.has(cand.accountNo)) {
+      return;
+    }
+
+    const isHistoryOnly =
+      this.historyToReverify.has(cand.accountNo) &&
+      cand.origin === 'local' &&
+      !favorites.has(cand.accountNo);
+
+    // R08：对本轮未再出现的非收藏历史账号，若本轮平台搜索覆盖已完整且来源可靠，直接移除
+    if (isHistoryOnly && this.searchComplete && this.rowDelegated.size === 0) {
+      this.removeResult(cand.accountNo);
+      return;
+    }
+
+    let record = cand.record;
+    let fetchedAt = this.now();
+
+    if (cand.origin === 'local' || (!itemMode && !record.statusKnown)) {
+      const d = await this.accounts.detail(cand.accountNo, {
+        priority: Priority.SCAN,
+        group: this.group(),
+        refresh: cand.origin === 'local',
+      });
+      record = d.record;
+      fetchedAt = d.at;
+    }
+    if (!this.alive(token)) return;
+
+    let score: number | null = 0;
+    let hitCount: number | null = 0;
+    let hitItems: InventoryItem[] = [];
+    let evidence: MatchEvidenceKind = 'inventory';
+    let verifiedAt = fetchedAt;
+
+    if (itemMode) {
+      const cachedInv = this.forceRefresh
+        ? null
+        : await this.accounts.peekCachedInventory(cand.accountNo);
+      if (!this.alive(token)) return;
+      if (cand.searchMatchedAllRows && !cachedInv) {
+        // A3（R04）：搜索证据快速路径，跳过完整库存请求，仅核验账号详情/状态
+        score = null;
+        hitCount = null;
+        hitItems = [];
+        evidence = 'search';
+        if (!record.statusKnown || this.forceRefresh) {
+          const d = await this.accounts.detail(cand.accountNo, {
+            priority: Priority.SCAN,
+            group: this.group(),
+            refresh: this.forceRefresh,
+          });
+          if (!this.alive(token)) return;
+          record = d.record;
+          fetchedAt = d.at;
+          verifiedAt = d.at;
+        }
+      } else {
+        const inv =
+          cachedInv ??
+          (await this.accounts.inventory(cand.accountNo, {
+            priority: Priority.SCAN,
+            group: this.group(),
+            refresh: this.forceRefresh,
+          }));
+        if (!this.alive(token)) return;
+        const match = this.accounts.matchInventoryWithCache(
+          cand.accountNo,
+          inv.items,
+          inv.fetchedAt,
+          rows,
+        );
+        if (!match.matched) {
+          // R08：证实不符时立即从匹配集中撤出
+          this.removeResult(cand.accountNo);
+          return;
+        }
+        score = match.score;
+        hitCount = match.score;
+        evidence = 'inventory';
+        verifiedAt = match.verifiedAt;
+        const hit = new Set(match.hitKeys);
+        hitItems = inv.items
+          .filter((i: InventoryItem) => hit.has(i.key))
+          .sort(
+            (a: InventoryItem, b: InventoryItem) => Number(b.price ?? 0) - Number(a.price ?? 0),
+          );
+        if (!record.statusKnown || this.forceRefresh) {
+          const d = await this.accounts.detail(cand.accountNo, {
+            priority: Priority.SCAN,
+            group: this.group(),
+            refresh: this.forceRefresh,
+          });
+          if (!this.alive(token)) return;
+          record = d.record;
+          fetchedAt = d.at;
+        }
+      }
+    }
+
+    this.accounts.noteSeen(record);
+    this.rememberUserRecord(this.activeUserScope, record, fetchedAt);
+
+    if (!fitsBasics(record, c)) {
+      this.removeResult(cand.accountNo);
+      return;
+    }
+
+    const result: ScanResultView = {
+      account: toAccountView(record, fetchedAt),
+      score,
+      hitItems: hitItems.slice(0, 4).map(toItemView),
+      hitCount,
+      favorite: favorites.has(cand.accountNo),
+      origin: cand.origin,
+      evidence,
+      verifiedAt,
+      fromHistory: false,
+      reverifyFailed: false,
+      stale: false,
+    };
+    this.upsertResult(result);
+  }
+
+  private async verify(token: number) {
     const favorites = await this.localFavorites();
     if (!this.alive(token)) return;
 
@@ -1493,130 +1712,7 @@ export class ScanService {
       this.retryQueue = [];
     }
 
-    const processOne = async (cand: Candidate) => {
-      if (this.earlyVerified.has(cand.accountNo)) {
-        return;
-      }
-
-      const isHistoryOnly =
-        this.historyToReverify.has(cand.accountNo) &&
-        cand.origin === 'local' &&
-        !favorites.has(cand.accountNo);
-
-      // R08：对本轮未再出现的非收藏历史账号，若本轮平台搜索覆盖已完整且来源可靠，直接移除
-      if (isHistoryOnly && this.searchComplete && this.rowDelegated.size === 0) {
-        this.removeResult(cand.accountNo);
-        return;
-      }
-
-      let record = cand.record;
-      let fetchedAt = this.now();
-
-      if (cand.origin === 'local' || (!itemMode && !record.statusKnown)) {
-        const d = await this.accounts.detail(cand.accountNo, {
-          priority: Priority.SCAN,
-          group: this.group(),
-          refresh: cand.origin === 'local',
-        });
-        record = d.record;
-        fetchedAt = d.at;
-      }
-      if (!this.alive(token)) return;
-
-      let score: number | null = 0;
-      let hitCount: number | null = 0;
-      let hitItems: InventoryItem[] = [];
-      let evidence: MatchEvidenceKind = 'inventory';
-      let verifiedAt = fetchedAt;
-
-      if (itemMode) {
-        const cachedInv = this.forceRefresh
-          ? null
-          : await this.accounts.peekCachedInventory(cand.accountNo);
-        if (!this.alive(token)) return;
-        if (cand.searchMatchedAllRows && !cachedInv) {
-          // A3（R04）：搜索证据快速路径，跳过完整库存请求，仅核验账号详情/状态
-          score = null;
-          hitCount = null;
-          hitItems = [];
-          evidence = 'search';
-          if (!record.statusKnown || this.forceRefresh) {
-            const d = await this.accounts.detail(cand.accountNo, {
-              priority: Priority.SCAN,
-              group: this.group(),
-              refresh: this.forceRefresh,
-            });
-            if (!this.alive(token)) return;
-            record = d.record;
-            fetchedAt = d.at;
-            verifiedAt = d.at;
-          }
-        } else {
-          const inv =
-            cachedInv ??
-            (await this.accounts.inventory(cand.accountNo, {
-              priority: Priority.SCAN,
-              group: this.group(),
-              refresh: this.forceRefresh,
-            }));
-          if (!this.alive(token)) return;
-          const match = this.accounts.matchInventoryWithCache(
-            cand.accountNo,
-            inv.items,
-            inv.fetchedAt,
-            rows,
-          );
-          if (!match.matched) {
-            // R08：证实不符时立即从匹配集中撤出
-            this.removeResult(cand.accountNo);
-            return;
-          }
-          score = match.score;
-          hitCount = match.score;
-          evidence = 'inventory';
-          verifiedAt = match.verifiedAt;
-          const hit = new Set(match.hitKeys);
-          hitItems = inv.items
-            .filter((i: InventoryItem) => hit.has(i.key))
-            .sort(
-              (a: InventoryItem, b: InventoryItem) => Number(b.price ?? 0) - Number(a.price ?? 0),
-            );
-          if (!record.statusKnown || this.forceRefresh) {
-            const d = await this.accounts.detail(cand.accountNo, {
-              priority: Priority.SCAN,
-              group: this.group(),
-              refresh: this.forceRefresh,
-            });
-            if (!this.alive(token)) return;
-            record = d.record;
-            fetchedAt = d.at;
-          }
-        }
-      }
-
-      this.accounts.noteSeen(record);
-      this.rememberUserRecord(this.activeUserScope, record, fetchedAt);
-
-      if (!fitsBasics(record, c)) {
-        this.removeResult(cand.accountNo);
-        return;
-      }
-
-      const result: ScanResultView = {
-        account: toAccountView(record, fetchedAt),
-        score,
-        hitItems: hitItems.slice(0, 4).map(toItemView),
-        hitCount,
-        favorite: favorites.has(cand.accountNo),
-        origin: cand.origin,
-        evidence,
-        verifiedAt,
-        fromHistory: false,
-        reverifyFailed: false,
-        stale: false,
-      };
-      this.upsertResult(result);
-    };
+    const processOne = (cand: Candidate) => this.processCandidate(cand, token, favorites);
 
     const handle = async (cand: Candidate) => {
       try {

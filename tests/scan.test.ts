@@ -308,19 +308,18 @@ describe('行内多选与内置方案', () => {
         .results.map((r) => r.account.accountNo)
         .sort(),
     ).toEqual(['CS0000000071', 'CS0000000072']);
-    // 冷启动走搜索证据快速路径：0 库存请求，score 为 null；按需加载完整库存后升级为精确命中数 6
-    expect(f.count('/rent/account/inventory/display/info')).toBe(0);
-    expect(h.controller.scan.state().results[0]?.evidence).toBe('search');
-    expect(h.controller.scan.state().results[0]?.score).toBeNull();
-    await h.controller.handle('account.inventory', {
-      accountNo: 'CS0000000071',
-      refresh: false,
-    });
-    const upgraded = h.controller.scan
+    // 格洛克18型 覆盖不完整：不能用其搜索结果求交，也不走快速路径；候选来自其余 5 个覆盖已认证的行，
+    // 逐个读完整库存确认（71/72/73 三个候选，73 缺格洛克被库存确认排除）
+    const searched = f.requests
+      .filter((r) => r.path === '/rent/account/search')
+      .map((r) => (r.body as { searchContent?: string }).searchContent);
+    expect(searched).not.toContain('格洛克18型');
+    expect(f.count('/rent/account/inventory/display/info')).toBe(3);
+    const r71 = h.controller.scan
       .state()
       .results.find((r) => r.account.accountNo === 'CS0000000071');
-    expect(upgraded?.evidence).toBe('inventory');
-    expect(upgraded?.score).toBe(6);
+    expect(r71?.evidence).toBe('inventory');
+    expect(r71?.score).toBe(6);
   });
 
   it('剩余分页多于当前候选的行不再翻页，由库存确认把关', async () => {
@@ -432,8 +431,12 @@ describe('1.0.2 审阅证据回归夹具迁移 (scan-analysis)', () => {
   const inventoryPath = '/rent/account/inventory/display/info';
   const detailPath = '/rent/account/get_info';
   const presetConditions = BUILTIN_FILTER_PRESETS[0]?.conditions ?? cond([]);
+  // 全部为覆盖已认证类别的方案（默认方案去掉格洛克 18 型一行），用于验证搜索证据快速路径
+  const certifiedConditions = cond(
+    presetConditions.items.filter((row) => !row.categoryIds.includes('w:格洛克 18 型')),
+  );
 
-  it('400 个高度重叠候选：冷启动走快速路径免全量库存、流式推送首条；热启动命中 5 分钟缓存', async () => {
+  it('400 个高度重叠候选（全认证类别）：冷启动走快速路径免全量库存、流式推送首条；热启动命中 5 分钟缓存', async () => {
     const fake = new FakePlatform(Array.from({ length: 400 }, (_, i) => fullKit(i)));
     const h = await createHarness({ fake });
     fake.latencyMs = 1;
@@ -449,7 +452,7 @@ describe('1.0.2 审阅证据回归夹具迁移 (scan-analysis)', () => {
           };
         }
       });
-      h.controller.scan.start(presetConditions);
+      h.controller.scan.start(certifiedConditions);
       await waitFor(() => h.controller.scan.state().phase === 'COMPLETE', 20_000);
       off();
       // 快速路径：不读取全量库存
@@ -471,7 +474,7 @@ describe('1.0.2 审阅证据回归夹具迁移 (scan-analysis)', () => {
           immediateLocalResults = event.payload.results.length;
         }
       });
-      h.controller.scan.start(presetConditions);
+      h.controller.scan.start(certifiedConditions);
       await waitFor(() => h.controller.scan.state().phase === 'COMPLETE', 20_000);
       offWarm();
       expect(immediateLocalResults).toBe(400);
@@ -483,23 +486,35 @@ describe('1.0.2 审阅证据回归夹具迁移 (scan-analysis)', () => {
     }
   });
 
-  it('重放真实平台关键词契约差异（格洛克/加利尔 返回 0，格洛克18型/加利尔AR 命中），内置方案不误判为空', async () => {
-    const fake = new FakePlatform([fullKit(0)]);
+  it('重放真实平台关键词契约差异（格洛克/加利尔 返回 0，格洛克18型 漏召回带空格命名），内置方案不误判为空也不漏账号', async () => {
+    // 第二个账号的格洛克按带空格命名，真实平台搜「格洛克18型」召回不到它（契约回放同样如此）
+    const spacedGlock = fullKit(1);
+    spacedGlock.inventory = spacedGlock.inventory.map((it) =>
+      it.marketName.startsWith('格洛克18型')
+        ? { ...it, marketName: '格洛克 18 型 | 水灵 (崭新出厂)' }
+        : it,
+    );
+    const fake = new FakePlatform([fullKit(0), spacedGlock]);
     fake.contractReplayMode = true;
     const h = await createHarness({ fake });
     try {
       fake.requests.length = 0;
       h.controller.scan.start(presetConditions);
       await waitFor(() => h.controller.scan.state().phase === 'COMPLETE');
-      expect(h.controller.scan.state().results).toHaveLength(1);
-      expect(h.controller.scan.state().results[0]?.account.accountNo).toBe('CS0000000000');
+      expect(
+        h.controller.scan
+          .state()
+          .results.map((r) => r.account.accountNo)
+          .sort(),
+      ).toEqual(['CS0000000000', 'CS0000000001']);
       expect(h.controller.scan.state().incomplete).toBe(false);
-      // 词典已改用格洛克18型，从未向平台发送 '格洛克'
+      // 格洛克 18 型覆盖不完整：既不发送返回 0 的「格洛克」，也不用「格洛克18型」的搜索集合排除账号
       const searchedKeywords = fake.requests
         .filter((r) => r.path === searchPath)
         .map((r) => (r.body as { searchContent?: string }).searchContent);
-      expect(searchedKeywords).toContain('格洛克18型');
       expect(searchedKeywords).not.toContain('格洛克');
+      expect(searchedKeywords).not.toContain('格洛克18型');
+      expect(h.controller.scan.state().results.every((r) => r.evidence === 'inventory')).toBe(true);
     } finally {
       await h.close();
     }
@@ -954,4 +969,150 @@ describe('A7/R14 覆盖完整性原因与失败页重试', () => {
       await h.close();
     }
   });
+});
+
+describe('1.0.2 端到端实测修复：覆盖证据约束求交、按成本翻页与候选阶段提前确认', () => {
+  const searchPath = '/rent/account/search';
+  const inventoryPath = '/rent/account/inventory/display/info';
+  const AK_ITEM: [string, string] = ['AK-47 | 红线 (久经沙场)', '步枪'];
+  const searchedPages = (f: FakePlatform) =>
+    f.requests
+      .filter((r) => r.path === searchPath)
+      .map((r) => {
+        const b = r.body as { searchContent?: string; page?: number };
+        return `${b.searchContent}:${b.page}`;
+      });
+
+  it('剩余分页多于预计可排除的候选时不翻页：按全量账号数估算排除比例', async () => {
+    // 1000 个账号，其中 950 个有 AK（10 页）；40 个有多普勒蝴蝶刀且都有 AK
+    const accounts = Array.from({ length: 1000 }, (_, i) => {
+      const items: [string, string][] = [];
+      if (i < 40) items.push(BFLY_DOPPLER);
+      if (i < 950) items.push(AK_ITEM);
+      else items.push(GLOVE);
+      return acc(`CS${String(i).padStart(10, '0')}`, items);
+    });
+    const f = new FakePlatform(accounts);
+    const h = await run(
+      f,
+      cond([
+        { categoryIds: [], names: ['多普勒'] },
+        { categoryIds: ['w:AK-47'], names: [] },
+      ]),
+    );
+    const pages = searchedPages(f);
+    // AK 行只取第 1 页探测规模：翻完需 9 页，预计只能排除 40 × (1 − 950/1000) = 2 个候选
+    expect(pages.filter((p) => p.startsWith('AK:'))).toEqual(['AK:1']);
+    expect(pages).toContain(':1'); // 空关键词第 1 页取全量账号数
+    expect(f.count(inventoryPath)).toBe(40);
+    expect(h.controller.scan.state().results).toHaveLength(40);
+    await h.close();
+  });
+
+  it('能排除大量候选的行仍然翻页求交', async () => {
+    // 1000 个账号，300 个有手套（3 页）；40 个多普勒账号里只有 10 个有手套
+    const accounts = Array.from({ length: 1000 }, (_, i) => {
+      const items: [string, string][] = [];
+      if (i < 40) items.push(BFLY_DOPPLER);
+      if ((i >= 30 && i < 330) || i >= 2000) items.push(GLOVE);
+      else items.push(AK_ITEM);
+      return acc(`CS${String(i).padStart(10, '0')}`, items);
+    });
+    const f = new FakePlatform(accounts);
+    const h = await run(
+      f,
+      cond([
+        { categoryIds: [], names: ['多普勒'] },
+        { categoryIds: ['f:手套'], names: [] },
+      ]),
+    );
+    expect(searchedPages(f).filter((p) => p.startsWith('手套:'))).toEqual([
+      '手套:1',
+      '手套:2',
+      '手套:3',
+    ]);
+    expect(f.count(inventoryPath)).toBe(10);
+    expect(h.controller.scan.state().results).toHaveLength(10);
+    await h.close();
+  });
+
+  it('覆盖不完整的行不参与求交：格洛克带空格命名的账号不会被搜索集合排除', async () => {
+    const SPACED: [string, string] = ['格洛克 18 型 | 水灵 (崭新出厂)', '手枪'];
+    const COMPACT: [string, string] = ['格洛克18型 | 水灵 (崭新出厂)', '手枪'];
+    const f = new FakePlatform([
+      acc('CS0000000801', [AK_ITEM, COMPACT]),
+      acc('CS0000000802', [AK_ITEM, SPACED]),
+      acc('CS0000000803', [AK_ITEM]),
+    ]);
+    f.contractReplayMode = true;
+    const h = await run(
+      f,
+      cond([
+        { categoryIds: ['w:AK-47'], names: [] },
+        { categoryIds: ['w:格洛克 18 型'], names: [] },
+      ]),
+    );
+    expect(
+      h.controller.scan
+        .state()
+        .results.map((r) => r.account.accountNo)
+        .sort(),
+    ).toEqual(['CS0000000801', 'CS0000000802']);
+    expect(searchedPages(f).some((p) => p.startsWith('格洛克'))).toBe(false);
+    expect(f.count(inventoryPath)).toBe(3);
+    await h.close();
+  });
+
+  it('只有覆盖不完整的行时回退为浏览全部账号并逐个确认，提示覆盖不完整', async () => {
+    const f = new FakePlatform([
+      acc('CS0000000811', [['格洛克 18 型 | 水灵 (崭新出厂)', '手枪']]),
+      acc('CS0000000812', [AK_ITEM]),
+    ]);
+    f.contractReplayMode = true;
+    const h = await run(f, cond([{ categoryIds: ['w:格洛克 18 型'], names: [] }]));
+    expect(h.controller.scan.state().results.map((r) => r.account.accountNo)).toEqual([
+      'CS0000000811',
+    ]);
+    expect(h.controller.scan.state().warnings.join('')).toContain('覆盖不完整');
+    await h.close();
+  });
+
+  it('后续搜索页挂住时，各来源行第 1 页都命中的账号已完成库存确认并可见', async () => {
+    // 150 个账号同时有多普勒蝴蝶刀与手套（两行各 2 页）
+    const accounts = Array.from({ length: 150 }, (_, i) =>
+      acc(`CS7${String(i).padStart(9, '0')}`, [BFLY_DOPPLER, GLOVE]),
+    );
+    const f = new FakePlatform(accounts);
+    const originalPost = f.post.bind(f);
+    let release: () => void = () => {};
+    const hung = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    f.post = async (url, body, headers, signal) => {
+      const parsed = JSON.parse(body || '{}') as { page?: number };
+      if (url.endsWith(searchPath) && (parsed.page ?? 1) >= 2) await hung;
+      return originalPost(url, body, headers, signal);
+    };
+    const h = await createHarness({ fake: f });
+    try {
+      h.controller.scan.start(
+        cond([
+          { categoryIds: [], names: ['多普勒'] },
+          { categoryIds: ['f:手套'], names: [] },
+        ]),
+      );
+      await waitFor(() => h.controller.scan.state().results.length > 0);
+      const s = h.controller.scan.state();
+      expect(s.phase).toBe('CANDIDATES');
+      expect(s.results[0]?.evidence).toBe('inventory');
+      release();
+      await waitFor(() => h.controller.scan.state().phase === 'COMPLETE', 15_000);
+      expect(h.controller.scan.state().results).toHaveLength(150);
+      // 提前确认过的账号不重复读库存
+      expect(f.count(inventoryPath)).toBe(150);
+    } finally {
+      release();
+      await h.close();
+    }
+  }, 20_000);
 });

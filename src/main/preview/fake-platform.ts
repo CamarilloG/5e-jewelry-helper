@@ -685,6 +685,10 @@ function matchesFakeSearchKeyword(
     if (keyword === '加利尔AR') {
       return item.marketName.includes('加利尔AR');
     }
+    // 实测：格洛克18型 同样只命中无空格命名，对「格洛克 18 型」漏召回（coverage=partial）
+    if (keyword === '格洛克18型') {
+      return item.marketName.includes('格洛克18型');
+    }
   }
   if (item.marketName.includes(keyword)) return true;
   const compactName = item.marketName.replace(/\s+/g, '');

@@ -3,7 +3,7 @@
 // → 皮肤（名称包含匹配，自由输入 + 常见联想，不在本词典内）。
 // 每个子类保存平台关键词与三类独立实测证据（queryable / precision / coverage）。
 
-export const CATALOG_VERSION = '2026.11.08-2';
+export const CATALOG_VERSION = '2026.11.08-3';
 
 export type KeywordQueryableEvidence = 'verified' | 'zero_result' | 'unverified';
 export type KeywordPrecisionEvidence = 'verified' | 'wide_match' | 'unverified';
@@ -245,7 +245,11 @@ export const CATEGORIES: CategoryEntry[] = [
     {
       label: '格洛克 18 型',
       keyword: '格洛克18型',
-      evidence: verifiedFull('search_total=144(格洛克=0,格洛克 18 型=0),inv_sample=3/3'),
+      // 实测：精确性抽样 100%，但完整库存抽样中 15 个持有账号仅召回 4 个（带空格命名未被索引），覆盖不完整
+      evidence: verifiedPartial(
+        'search_total=144(格洛克=0,格洛克 18 型=0),inv_sample_precision=3/3,partial_recall=4/15',
+        { precision: 'verified', coverage: 'partial' },
+      ),
     },
     {
       label: 'USP 消音版',
