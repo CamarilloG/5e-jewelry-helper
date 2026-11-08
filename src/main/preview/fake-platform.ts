@@ -363,8 +363,13 @@ export class FakePlatform implements HttpTransport {
   validToken = 'fake-credential';
   now: () => number = Date.now;
   orderRemainSeconds = 181;
+  /**
+   * A8 契约回放模式：启用后按真实平台实测规则回放关键词差异
+   * （如「格洛克」「加利尔」「M9 刺刀」「M4A1消音版」返回 0，「加利尔AR」不匹配带空格的「加利尔 AR」等）。
+   */
+  contractReplayMode = false;
   payImage =
-    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/b9sAAAAASUVORK5CYII=';
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC0lEQVR42mP8/x8AAwMCAO+/b9sAAAAASUVORK5CYII=';
 
   constructor(accounts?: FakeAccount[]) {
     this.accounts = accounts ?? generateAccounts();
@@ -521,12 +526,18 @@ export class FakePlatform implements HttpTransport {
       case '/rent/account/search': {
         const keyword = String(p.searchContent ?? '');
         const rentType = Number(p.rentType);
+        if (this.contractReplayMode && CONTRACT_ZERO_KEYWORDS.has(keyword)) {
+          return ok({ total: '0', isFirst: 0, list: [] }, now);
+        }
         const matches = this.accounts.filter(
           (a) =>
             a.shelfStatus === 1 &&
             a.rentType.includes(rentType) &&
             (Number(p.useCoupon) !== 1 || a.useCoupon === 1) &&
-            (!keyword || a.inventory.some((it) => it.marketName.includes(keyword))),
+            (!keyword ||
+              a.inventory.some((it) =>
+                matchesFakeSearchKeyword(it, keyword, this.contractReplayMode),
+              )),
         );
         const page = this.paged(matches, Number(p.page), Number(p.size));
         return ok(
@@ -641,6 +652,44 @@ export class FakePlatform implements HttpTransport {
         return fail(404, '未实现', now);
     }
   }
+}
+
+/** A8 真实平台只读实测确认返回 0 的关键词（详见 docs/验证记录.md 与 .validation/probes/probe-102-result.json）。 */
+export const CONTRACT_ZERO_KEYWORDS = new Set([
+  '格洛克',
+  '格洛克 18 型',
+  '加利尔',
+  '加利尔 AR',
+  'M9 刺刀',
+  'CZ75自动手枪',
+  'CZ75 自动手枪',
+  'M4A1消音版',
+  'M4A1 消音版',
+  '匕首',
+  '步枪',
+  '手枪',
+  '微型冲锋枪',
+  '霰弹枪',
+  '机枪',
+  '探员',
+]);
+
+function matchesFakeSearchKeyword(
+  item: FakeItem,
+  keyword: string,
+  contractReplayMode: boolean,
+): boolean {
+  if (contractReplayMode) {
+    if (CONTRACT_ZERO_KEYWORDS.has(keyword)) return false;
+    // 实测：加利尔AR 在真实平台只命中无空格的「加利尔AR」，对带空格的「加利尔 AR」漏召回
+    if (keyword === '加利尔AR') {
+      return item.marketName.includes('加利尔AR');
+    }
+  }
+  if (item.marketName.includes(keyword)) return true;
+  const compactName = item.marketName.replace(/\s+/g, '');
+  const compactKeyword = keyword.replace(/\s+/g, '');
+  return compactKeyword.length > 0 && compactName.includes(compactKeyword);
 }
 
 function respond(status: number, text: string, retryAfter?: string): TransportResponse {
