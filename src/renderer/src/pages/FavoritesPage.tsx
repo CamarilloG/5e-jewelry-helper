@@ -1,8 +1,9 @@
-// P3 收藏监测：监测控制条、收藏行（状态、预设、上次变化、单条监测开关、一键出码）、平台同步标记。
+// P3 收藏监测：监测控制条、收藏行（3×3 饰品宫格、状态、预设、上次变化、单条监测开关、一键出码）、平台同步标记。
 import { MoreOutlined } from '@ant-design/icons';
 import { App, Button, Dropdown, Empty, Select, Space, Switch, Tag, Tooltip } from 'antd';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { FavoriteView } from '../../../shared/dto';
+import type { FavoriteView, ItemView } from '../../../shared/dto';
+import { formatYuan } from '../../../shared/money';
 import { STATUS_LABEL } from '../../../shared/status';
 import { call } from '../api';
 import { StatusBadge, Thumb } from '../components/common';
@@ -12,6 +13,7 @@ import { useUi } from '../store';
 
 type SortKey = 'AVAILABLE_FIRST' | 'CREATED' | 'CHANGED';
 const STATUS_ORDER = { AVAILABLE: 0, RENTED: 1, UNKNOWN: 2, OFF_SHELF: 3 } as const;
+const GRID_SLOTS = [0, 1, 2, 3, 4, 5, 6, 7, 8] as const;
 
 function useNow(interval = 1000) {
   const [now, setNow] = useState(Date.now());
@@ -192,6 +194,62 @@ export function FavoritesPage() {
   );
 }
 
+/** C1–C3：收藏卡片 3×3 饰品宫格，悬停显示名称、磨损与估价；不足 9 件留空格，兼容旧单图摘要。 */
+export function FavoriteGrid({
+  favorite: f,
+  onOpen,
+}: {
+  favorite: FavoriteView;
+  onOpen: () => void;
+}) {
+  const gridItems = f.gridItems ?? [];
+  const legacyThumb =
+    gridItems.length === 0 && f.summarySource !== 'empty_inventory' ? f.thumbnail : null;
+
+  return (
+    <button
+      type="button"
+      className="jh-fav-grid"
+      aria-label={`${f.accountNo} 饰品宫格`}
+      onClick={onOpen}
+    >
+      {GRID_SLOTS.map((slotIndex) => {
+        const item: ItemView | undefined = gridItems[slotIndex];
+        if (item) {
+          const wearLine = [item.exterior, item.wear ? `磨损 ${item.wear}` : null]
+            .filter(Boolean)
+            .join(' · ');
+          const priceLine = item.price ? formatYuan(item.price, { compact: false }) : '暂无估价';
+          return (
+            <Tooltip
+              key={item.key || slotIndex}
+              title={
+                <div className="jh-item-tip">
+                  <div>{item.name}</div>
+                  {wearLine ? <div className="jh-small">{wearLine}</div> : null}
+                  <div className="jh-num">估价 {priceLine}</div>
+                </div>
+              }
+            >
+              <div className="jh-fav-grid-cell">
+                <Thumb src={item.image} alt={item.name} size={{ w: 34, h: 26 }} />
+              </div>
+            </Tooltip>
+          );
+        }
+        if (slotIndex === 0 && legacyThumb) {
+          return (
+            <div key="legacy-0" className="jh-fav-grid-cell">
+              <Thumb src={legacyThumb} alt={f.accountNo} size={{ w: 34, h: 26 }} />
+            </div>
+          );
+        }
+        return <div key={`empty-${slotIndex}`} className="jh-fav-grid-cell jh-fav-grid-empty" />;
+      })}
+    </button>
+  );
+}
+
 function FavoriteRow({
   favorite: f,
   focused,
@@ -220,7 +278,7 @@ function FavoriteRow({
       className={`jh-fav-row ${f.unseen ? 'jh-fav-new' : ''} ${focused ? 'jh-fav-focus' : ''}`}
       aria-label={`收藏 ${f.accountNo} ${STATUS_LABEL[f.status]}`}
     >
-      <Thumb src={f.thumbnail} alt={f.accountNo} size={{ w: 88, h: 66 }} />
+      <FavoriteGrid favorite={f} onOpen={open} />
       <div className="jh-fav-main">
         <div className="jh-fav-line">
           <button type="button" className="jh-account jh-linklike" onClick={open}>

@@ -1,0 +1,97 @@
+{
+  "correlated400": {
+    "cold": {
+      "results": 400,
+      "searchRequests": 20,
+      "inventoryRequests": 400,
+      "detailRequests": 400,
+      "searchesBeforeFirstInventory": 20,
+      "firstDetailIndex": 22,
+      "candidatePhaseNonempty": false,
+      "firstNonemptyEvent": {
+        "phase": "VERIFYING",
+        "results": 11,
+        "confirmed": 11
+      }
+    },
+    "warm": {
+      "results": 400,
+      "searchRequests": 20,
+      "inventoryRequests": 0,
+      "detailRequests": 0,
+      "searchesBeforeFirstInventory": null,
+      "firstDetailIndex": -1,
+      "candidatePhaseNonempty": false,
+      "firstNonemptyEvent": {
+        "phase": "COMPLETE",
+        "results": 400,
+        "confirmed": 400
+      }
+    },
+    "syntheticRateLimit": 1000000
+  },
+  "zeroKeywordReplay": {
+    "actualMatchingAccountsInFixture": 1,
+    "returnedResults": 0,
+    "incomplete": false,
+    "searchRequests": 8,
+    "inventoryRequests": 0
+  },
+  "candidateResume": {
+    "beforeResume": 3,
+    "before": [
+      {
+        "price": [],
+        "page": 1,
+        "searchContent": "蝴蝶刀",
+        "size": 100,
+        "sortType": "",
+        "sortField": "",
+        "rentType": 1,
+        "useCoupon": -1
+      },
+      {
+        "price": [],
+        "page": 1,
+        "searchContent": "爪子刀",
+        "size": 100,
+        "sortType": "",
+        "sortField": "",
+        "rentType": 1,
+        "useCoupon": -1
+      },
+      {
+        "price": [],
+        "page": 1,
+        "searchContent": "锯齿爪刀",
+        "size": 100,
+        "sortType": "",
+        "sortField": "",
+        "rentType": 1,
+        "useCoupon": -1
+      }
+    ],
+    "after": [
+      {
+        "price": [],
+        "page": 1,
+        "searchContent": "蝴蝶刀",
+        "size": 100,
+        "sortType": "",
+        "sortField": "",
+        "rentType": 1,
+        "useCoupon": -1
+      },
+      {
+        "price": [],
+        "page": 1,
+        "searchContent": "爪子刀",
+        "size": 100,
+        "sortType": "",
+        "sortField": "",
+        "rentType": 1,
+        "useCoupon": -1
+      }
+    ]
+  }
+}

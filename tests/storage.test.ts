@@ -384,4 +384,73 @@ describe('缓存', () => {
     ).toBeNull();
     await db.close();
   });
+
+  it('1.0.2 C4/B2: 完整库存宫格摘要不被展示摘要覆盖；profile.lastUsed 返回最近活跃用户', async () => {
+    const db = await InlineDbClient.open();
+    await db.call('profile.touch', { profileId: P1, now: 100 });
+    await db.call('profile.touch', { profileId: P2, now: 200 });
+    expect(await db.call('profile.lastUsed', undefined)).toBe(P2);
+
+    const invSummary = JSON.stringify({
+      accountNo: 'CS999',
+      tags: ['高看点'],
+      totalValue: '5000.00',
+      prices: { hour: '8.00', day: '80.00', week: null, morning: null, noon: null, evening: null },
+      supportedRentKinds: ['HOUR', 'DAY'],
+      rentPeriod: 'ANYTIME',
+      weekRange: { morning: [], noon: [], evening: [] },
+      status: 'AVAILABLE',
+      leaseExpireTime: null,
+      couponAllowed: true,
+      platformCouponConfig: 1,
+      durations: { hour: [1, 2], day: [1], week: [] },
+      thumbnailUrl: 'https://cdn.fake.local/1.png',
+      summaryVersion: 2,
+      summarySource: 'inventory',
+      summaryUpdatedAt: 100,
+      gridItems: Array.from({ length: 9 }, (_, i) => ({
+        key: `匕首|蝴蝶刀|p${i}`,
+        name: `蝴蝶刀 ${i}`,
+        imageUrl: `https://cdn.fake.local/${i}.png`,
+        price: `${1000 - i}`,
+        exteriorName: '崭新出厂',
+        wear: '0.01',
+      })),
+    });
+    const displaySummary = JSON.stringify({
+      ...JSON.parse(invSummary),
+      prices: { hour: '9.00', day: '90.00', week: null, morning: null, noon: null, evening: null },
+      summarySource: 'display',
+      summaryUpdatedAt: 200,
+      gridItems: [
+        {
+          key: '匕首|蝴蝶刀|p0',
+          name: '蝴蝶刀 0',
+          imageUrl: 'https://cdn.fake.local/0.png',
+          price: '1000',
+          exteriorName: '崭新出厂',
+          wear: '0.01',
+        },
+      ],
+    });
+    await db.call('favorites.addManual', {
+      profileId: P1,
+      accountNo: 'CS999',
+      now: 100,
+      summaryJson: invSummary,
+    });
+    await db.call('favorites.mergePlatform', {
+      profileId: P1,
+      accounts: [{ accountNo: 'CS999', summaryJson: displaySummary }],
+      complete: true,
+      now: 200,
+    });
+    const list = await db.call('favorites.list', { profileId: P1 });
+    const parsed = JSON.parse(list.favorites[0]?.summary_json ?? '{}');
+    expect(parsed.summarySource).toBe('inventory');
+    expect(parsed.gridItems).toHaveLength(9);
+    // 动态价格字段正常更新
+    expect(parsed.prices.hour).toBe('9.00');
+    await db.close();
+  });
 });

@@ -316,6 +316,43 @@ body.jh-resizing {
   display: flex;
   flex-direction: column;
 }
+.jh-pending-group {
+  background: #fff;
+  border: 1px solid #d8d6fa;
+  border-radius: 10px;
+  margin-bottom: 10px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.jh-pending-head {
+  width: 100%;
+  border: 0;
+  background: #f5f4fe;
+  padding: 8px 12px;
+  font: inherit;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--jh-text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+}
+.jh-pending-head:hover {
+  background: #ecebfa;
+}
+.jh-pending-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 10px;
+  padding: 10px 12px;
+  max-height: 310px;
+  overflow-y: auto;
+}
+.jh-pending-cell {
+  min-height: 240px;
+}
 .jh-skeletons {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
@@ -577,6 +614,7 @@ body.jh-resizing {
 .jh-inline-error {
   color: var(--jh-risk);
 }
+.jh-params,
 .jh-order .jh-params {
   display: flex;
   flex-direction: column;
@@ -588,12 +626,6 @@ body.jh-resizing {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-}
-.jh-params {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 8px;
 }
 .jh-qty {
   display: inline-flex;
@@ -642,7 +674,7 @@ body.jh-resizing {
 }
 .jh-fav-row {
   display: grid;
-  grid-template-columns: 88px 1fr auto;
+  grid-template-columns: 114px 1fr auto;
   gap: 14px;
   align-items: center;
   background: #fff;
@@ -650,6 +682,36 @@ body.jh-resizing {
   border-radius: 10px;
   padding: 10px 14px;
   transition: background 0.6s;
+}
+.jh-fav-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 34px);
+  grid-template-rows: repeat(3, 26px);
+  gap: 3px;
+  width: 114px;
+  padding: 3px;
+  background: var(--jh-zone);
+  border: 1px solid var(--jh-border);
+  border-radius: 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.jh-fav-grid:hover {
+  border-color: #c7c4f7;
+}
+.jh-fav-grid-cell {
+  width: 34px;
+  height: 26px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.jh-fav-grid-empty {
+  background: #eef0f4;
+  border: 1px dashed #e2e5ec;
 }
 .jh-fav-new {
   background: #f0fdf4;

@@ -9,7 +9,7 @@ import { type CredentialReader, jwtExpiryMs } from './reader-process';
 
 export interface AuthEvents {
   /** 身份确认成功；previous 为上一个已确认的身份（可能与当前相同） */
-  confirmed(profileId: string, previous: string | null): void;
+  confirmed(profileId: string, previous: string | null): void | Promise<void>;
   /** 运行中失效或读取后无法使用 */
   lost(phase: AuthPhase): void;
 }
@@ -123,7 +123,7 @@ export class AuthService implements CredentialSource {
         maintenance: info.maintenance,
         agreementDone,
       };
-      this.events.confirmed(info.profileId, previous);
+      await this.events.confirmed(info.profileId, previous);
     } catch (error) {
       if (error instanceof PlatformError && error.code === 'AUTH_EXPIRED') {
         return this.setLost('EXPIRED', null);

@@ -1,5 +1,6 @@
 // 主进程投影给界面的显示 DTO。界面只渲染这些结果，不复制计费、状态判定或调度规则。
 import type { ItemCondition } from './conditions';
+import { compareDecimalText } from './money';
 import type { RentKind } from './rent';
 import type { DeviceSettings, OrderPreset, ProfileSettings } from './settings';
 import type { AccountStatus } from './status';
@@ -113,13 +114,34 @@ export interface AccountView {
 
 export type ScanPhase = 'IDLE' | 'CANDIDATES' | 'VERIFYING' | 'COMPLETE' | 'STOPPED' | 'FAILED';
 
+export type MatchEvidenceKind = 'inventory' | 'search';
+export type SummarySourceKind = 'inventory' | 'display' | 'empty_inventory';
+
 export interface ScanResultView {
   account: AccountView;
-  score: number;
+  /** 库存确认路径为去重命中件数；搜索证据快速路径未读库存时为 null（“未计算”） */
+  score: number | null;
   hitItems: ItemView[];
-  hitCount: number;
+  /** 库存确认路径为去重命中件数；搜索证据快速路径未读库存时为 null（“未计算”） */
+  hitCount: number | null;
   favorite: boolean;
   origin: 'platform' | 'local';
+  /** 匹配证据类型：完整库存（inventory）或已认证类别搜索证据（search） */
+  evidence?: MatchEvidenceKind;
+  /** 证据核验时间戳 */
+  verifiedAt?: number;
+  /** 是否来自上次结果/历史快照且尚未完成本轮远程复核 */
+  fromHistory?: boolean;
+  /** 本轮复核请求失败（保留历史条目并标“未能复核”） */
+  reverifyFailed?: boolean;
+  /** 离线、身份未确认或库存过期时的历史/待核验标记，不计为实时可租 */
+  stale?: boolean;
+}
+
+export interface FailedSearchPage {
+  keyword: string;
+  page: number;
+  error: string;
 }
 
 export interface ScanView {
@@ -136,6 +158,26 @@ export interface ScanView {
   warnings: string[];
   startedAt: number | null;
   finishedAt: number | null;
+  /** 候选发现是否已结束（发现未结束时不显示固定总量百分比） */
+  discoveryComplete?: boolean;
+  /** 已检查数量 */
+  checkedCount?: number;
+  /** 待检查数量 */
+  pendingCount?: number;
+  /** 覆盖是否完整（区别于任务 phase === 'COMPLETE'） */
+  coverageComplete?: boolean;
+  /** 未完整覆盖的具体原因列表 */
+  partialReasons?: string[];
+  /** 失败的搜索分页列表（可随 retryFailed 一并恢复） */
+  failedPages?: FailedSearchPage[];
+  /** 候选快照时间（命中五分钟分页缓存或本地历史快照时显示） */
+  snapshotAt?: number | null;
+  /** 本轮候选是否复用了五分钟搜索缓存 */
+  fromCache?: boolean;
+  /** 是否为独立“本地匹配”模式 */
+  localOnly?: boolean;
+  /** 空结果原因（如无本地记录、候选来源不可用） */
+  emptyReason?: 'NO_LOCAL_RECORDS' | 'SOURCE_UNAVAILABLE' | null;
 }
 
 export interface FilterConditions {
@@ -194,6 +236,14 @@ export interface FavoriteView {
   createdAt: number;
   tags: string[];
   thumbnail: string | null;
+  /** C1–C3：摘要版本（v2 支持 3×3 宫格选图与来源区分） */
+  summaryVersion?: 1 | 2;
+  /** C1–C3：3×3 宫格饰品条目（至多 9 件） */
+  gridItems?: ItemView[];
+  /** C3：摘要来源（inventory 完整库存 / display 列表展示位 / empty_inventory 已确认空库存） */
+  summarySource?: SummarySourceKind;
+  /** C3：摘要来源时间 */
+  summaryUpdatedAt?: number | null;
   prices: PriceView[];
   preset: OrderPreset | null;
   presetSummary: string | null;
@@ -302,3 +352,93 @@ export const MAIN_EVENT_TYPES: MainEventType[] = [
   'toast',
   'confirmQuit',
 ];
+
+export type SortKey = 'SCORE' | 'PRICE_ASC' | 'PRICE_DESC' | 'VALUE_ASC' | 'VALUE_DESC';
+export type StatusFilter = 'AVAILABLE' | 'ALL' | 'RENTED' | 'OFF_SHELF';
+
+export function sortResultList(
+  list: ScanResultView[],
+  sort: SortKey,
+  rentKind: RentKind,
+): ScanResultView[] {
+  const priceOf = (r: ScanResultView) =>
+    r.account.prices.find((p) => p.kind === rentKind)?.price ?? null;
+  const sorted = [...list];
+  sorted.sort((a, b) => {
+    switch (sort) {
+      case 'SCORE': {
+        // A3（R04）：按匹配度排序仅比较已确认库存（score != null）的结果，未计算项排在后面按价格升序
+        const aHas = a.evidence !== 'search' && a.score != null;
+        const bHas = b.evidence !== 'search' && b.score != null;
+        if (aHas && !bHas) return -1;
+        if (!aHas && bHas) return 1;
+        if (aHas && bHas) {
+          const diff = (b.score ?? 0) - (a.score ?? 0);
+          if (diff !== 0) return diff;
+        }
+        return compareDecimalText(priceOf(a), priceOf(b));
+      }
+      case 'PRICE_ASC':
+        return compareDecimalText(priceOf(a), priceOf(b));
+      case 'PRICE_DESC':
+        return compareDecimalText(priceOf(b), priceOf(a));
+      case 'VALUE_ASC':
+        return compareDecimalText(a.account.value, b.account.value);
+      case 'VALUE_DESC':
+        return compareDecimalText(b.account.value, a.account.value);
+    }
+    return 0;
+  });
+  return sorted;
+}
+
+/**
+ * A5（R05）：在默认“仅可租”视图下，将状态待确认（UNKNOWN 或离线历史 stale）的结果分入独立的
+ * “已匹配，状态待确认”分组；状态确认后自动移入对应状态分组，“当前可租”只统计已确认可租项。
+ */
+export function partitionResultsForFilter(
+  allResults: ScanResultView[],
+  sort: SortKey,
+  statusFilter: StatusFilter,
+  rentKind: RentKind,
+): {
+  mainResults: ScanResultView[];
+  pendingResults: ScanResultView[];
+  availableCount: number;
+  hiddenNonAvailableCount: number;
+} {
+  const isPending = (r: ScanResultView) => r.account.status === 'UNKNOWN' || Boolean(r.stale);
+  const confirmedAvailable = allResults.filter(
+    (r) => !isPending(r) && r.account.status === 'AVAILABLE',
+  );
+  const pending = allResults.filter(isPending);
+  const hiddenNonAvailableCount = allResults.filter(
+    (r) => !isPending(r) && (r.account.status === 'RENTED' || r.account.status === 'OFF_SHELF'),
+  ).length;
+
+  if (statusFilter === 'AVAILABLE') {
+    return {
+      mainResults: sortResultList(confirmedAvailable, sort, rentKind),
+      pendingResults: sortResultList(pending, sort, rentKind),
+      availableCount: confirmedAvailable.length,
+      hiddenNonAvailableCount,
+    };
+  }
+
+  if (statusFilter === 'ALL') {
+    return {
+      mainResults: sortResultList(allResults, sort, rentKind),
+      pendingResults: [],
+      availableCount: confirmedAvailable.length,
+      hiddenNonAvailableCount: 0,
+    };
+  }
+
+  const filtered = allResults.filter((r) => !isPending(r) && r.account.status === statusFilter);
+  return {
+    mainResults: sortResultList(filtered, sort, rentKind),
+    pendingResults: [],
+    availableCount: confirmedAvailable.length,
+    hiddenNonAvailableCount: 0,
+  };
+}

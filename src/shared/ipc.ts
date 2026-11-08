@@ -69,6 +69,11 @@ export const ipcInputs = {
   'scan.start': z.object({
     conditions: filterConditionsSchema,
     presetId: z.string().max(64).nullable(),
+    forceRefresh: z.boolean().optional(),
+  }),
+  'scan.startLocal': z.object({
+    conditions: filterConditionsSchema,
+    presetId: z.string().max(64).nullable(),
   }),
   'scan.stop': none,
   'scan.continue': none,
@@ -140,6 +145,7 @@ export interface IpcOutputs {
   'auth.chooseDirectory': StatusView;
   'auth.resetDirectory': StatusView;
   'scan.start': ScanView;
+  'scan.startLocal': ScanView;
   'scan.stop': ScanView;
   'scan.continue': ScanView;
   'scan.retryFailed': ScanView;
