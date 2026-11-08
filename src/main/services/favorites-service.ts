@@ -1,5 +1,6 @@
 // 收藏同步（业务流程 §4）：完整分页快照才用于合并；只增不删；移除记录不被导入；
 // 每个账号只有一条最新写回意图，revision 递增，旧响应只能更新自身 revision。
+// 1.0.2 C1–C5：支持 3×3 宫格摘要、完整库存不降级、Priority.BACKGROUND 后台去重补读。
 import type { FavoritesView, FavoriteView } from '../../shared/dto';
 import { RENT_META, type RentKind, supportsRent } from '../../shared/rent';
 import type { OrderPreset } from '../../shared/settings';
@@ -7,18 +8,34 @@ import { ACCOUNT_STATUSES, type AccountStatus } from '../../shared/status';
 import type { Logger } from '../logger';
 import type { PlatformApi } from '../platform/api';
 import { isCancelled, PlatformError, userMessage } from '../platform/errors';
-import { Priority } from '../platform/queue';
-import type { AccountRecord } from '../platform/schemas';
+import { Priority, type RequestQueue } from '../platform/queue';
+import type { AccountRecord, InventoryItem } from '../platform/schemas';
 import type { DbClient } from '../storage/client';
 import type { FavoriteRow, PresetRow } from '../storage/ops';
 import type { AccountService } from './account-service';
-import { type AccountSummary, priceViews, summarize } from './views';
+import {
+  type AccountSummary,
+  applyInventoryToSummary,
+  mergeAccountSummary,
+  priceViews,
+  summarize,
+  upgradeAccountSummary,
+} from './views';
 
 const MAX_PAGES = 100;
+const BACKFILL_RETRY_COOLDOWN_MS = 60_000;
+const BACKFILL_MAX_ATTEMPTS = 3;
 
 export interface PlatformSnapshot {
   records: Map<string, AccountRecord>;
   complete: boolean;
+}
+
+interface BackfillEntry {
+  status: 'inflight' | 'done' | 'failed';
+  attempts: number;
+  nextRetryAt: number;
+  lastError: string | null;
 }
 
 function asStatus(value: string | null): AccountStatus | null {
@@ -52,6 +69,9 @@ export class FavoritesService {
     error: null,
   };
   private syncing: Promise<PlatformSnapshot | null> | null = null;
+  private backfillMap = new Map<string, BackfillEntry>();
+  private backfillPaused = false;
+  private backfillPendingOnResume = false;
 
   constructor(
     private readonly api: PlatformApi,
@@ -61,7 +81,59 @@ export class FavoritesService {
     private readonly onChange: () => void,
     private readonly logger: Logger,
     private readonly now: () => number = Date.now,
-  ) {}
+    private readonly queue?: RequestQueue,
+  ) {
+    this.accounts.onInventoryLoaded((accountNo, items, fetchedAt) => {
+      void this.onInventoryLoadedForFavorite(accountNo, items, fetchedAt);
+    });
+  }
+
+  private async onInventoryLoadedForFavorite(
+    accountNo: string,
+    items: InventoryItem[],
+    fetchedAt: number,
+  ) {
+    const profileId = this.profile();
+    if (!profileId) return;
+    try {
+      const row = await this.db.call('favorites.get', { profileId, accountNo });
+      if (!row) return;
+      let existing: AccountSummary | null = null;
+      try {
+        existing = row.summary_json ? (JSON.parse(row.summary_json) as AccountSummary) : null;
+      } catch {
+        existing = null;
+      }
+      const baseSummary: AccountSummary = existing ?? {
+        tags: [],
+        pricing: {
+          rentType: [],
+          prices: {},
+          firstPrices: {},
+          actPrices: {},
+          rentPeriod: null,
+          weekRange: { EARLY: [], NOON: [], NIGHT: [] },
+        },
+        thumbnail: null,
+        thumbnailSource: null,
+      };
+      const updated = applyInventoryToSummary(baseSummary, items, fetchedAt);
+      await this.db.call('favorites.updateSummary', {
+        profileId,
+        accountNo,
+        summaryJson: JSON.stringify(updated),
+      });
+      this.backfillMap.set(`${profileId}:${accountNo}`, {
+        status: 'done',
+        attempts: 1,
+        nextRetryAt: 0,
+        lastError: null,
+      });
+      this.onChange();
+    } catch {
+      // 忽略异常
+    }
+  }
 
   private requireProfile(): string {
     const id = this.profile();
@@ -85,7 +157,14 @@ export class FavoritesService {
   /** 工具内手动收藏：本地立即生效，随后按最新 revision 写回平台。 */
   async add(accountNo: string, record: AccountRecord | null): Promise<{ pendingSync: boolean }> {
     const profileId = this.requireProfile();
-    const summary = record ? JSON.stringify(summarize(record)) : null;
+    const cachedInv = await this.accounts.peekCachedInventory(accountNo);
+    const summary = record
+      ? JSON.stringify(
+          summarize(record, cachedInv?.items, {
+            updatedAt: cachedInv?.fetchedAt ?? this.now(),
+          }),
+        )
+      : null;
     const { revision } = await this.db.call('favorites.addManual', {
       profileId,
       accountNo,
@@ -241,12 +320,34 @@ export class FavoritesService {
     if (!profileId || this.profile() !== profileId) return null;
     for (const record of records.values()) this.accounts.noteRecord(record);
     await this.accounts.remember([...records.values()], 'favorite');
+
+    const existingRows = await this.rows();
+    const existingSummaries = new Map<string, AccountSummary>();
+    for (const row of existingRows) {
+      if (!row.summary_json) continue;
+      try {
+        existingSummaries.set(row.account_no, JSON.parse(row.summary_json) as AccountSummary);
+      } catch {
+        // 忽略损坏摘要
+      }
+    }
+
+    const accountsPayload: { accountNo: string; summaryJson: string | null }[] = [];
+    for (const r of records.values()) {
+      const cachedInv = await this.accounts.peekCachedInventory(r.accountNo);
+      const rawSummary = summarize(r, cachedInv?.items, {
+        updatedAt: cachedInv?.fetchedAt ?? this.now(),
+      });
+      const merged = mergeAccountSummary(rawSummary, existingSummaries.get(r.accountNo));
+      accountsPayload.push({
+        accountNo: r.accountNo,
+        summaryJson: JSON.stringify(merged),
+      });
+    }
+
     const merge = await this.db.call('favorites.mergePlatform', {
       profileId,
-      accounts: [...records.values()].map((r) => ({
-        accountNo: r.accountNo,
-        summaryJson: JSON.stringify(summarize(r)),
-      })),
+      accounts: accountsPayload,
       complete,
       now: this.now(),
     });
@@ -263,7 +364,194 @@ export class FavoritesService {
     return { records, complete };
   }
 
-  async view(): Promise<FavoritesView> {
+  /**
+   * C5：后台补读完整库存以生成 3×3 宫格。
+   * - 按 `profileId:accountNo` 去重，重复打开或重绘不重复创建
+   * - 库存缓存仍有效时直接采用缓存，不发网络请求
+   * - 走 `Priority.BACKGROUND`（低于扫描、监测与交互），受支付暂停与退出/切号取消控制
+   */
+  scheduleBackfill(rowsOverride?: FavoriteRow[]): void {
+    void this.runBackfillPass(rowsOverride);
+  }
+
+  private async runBackfillPass(rowsOverride?: FavoriteRow[]): Promise<void> {
+    if (this.backfillPaused) {
+      this.backfillPendingOnResume = true;
+      return;
+    }
+    const profileId = this.profile();
+    if (!profileId) return;
+    await this.accounts.syncCacheEpoch();
+
+    const rows = rowsOverride ?? (await this.rows());
+    const now = this.now();
+
+    for (const row of rows) {
+      if (this.backfillPaused) {
+        this.backfillPendingOnResume = true;
+        return;
+      }
+      if (this.profile() !== profileId) return;
+      let summary: AccountSummary | null = null;
+      try {
+        summary = row.summary_json
+          ? upgradeAccountSummary(
+              JSON.parse(row.summary_json) as AccountSummary,
+              row.checked_at ?? row.created_at,
+            )
+          : null;
+      } catch {
+        summary = null;
+      }
+
+      const hasFullInv =
+        summary?.summarySource === 'inventory' || summary?.summarySource === 'empty_inventory';
+      const cachedInv = await this.accounts.peekCachedInventory(row.account_no);
+
+      const key = `${profileId}:${row.account_no}`;
+      const state = this.backfillMap.get(key);
+
+      if (hasFullInv && cachedInv) {
+        this.backfillMap.set(key, {
+          status: 'done',
+          attempts: state?.attempts ?? 1,
+          nextRetryAt: 0,
+          lastError: null,
+        });
+        continue;
+      }
+
+      // 若本地已有有效库存缓存，直接升级宫格，不发起网络请求
+      if (cachedInv && !hasFullInv) {
+        const base: AccountSummary = summary ?? {
+          tags: [],
+          pricing: {
+            rentType: [],
+            prices: {},
+            firstPrices: {},
+            actPrices: {},
+            rentPeriod: null,
+            weekRange: { EARLY: [], NOON: [], NIGHT: [] },
+          },
+          thumbnail: null,
+          thumbnailSource: null,
+        };
+        const upgraded = applyInventoryToSummary(base, cachedInv.items, cachedInv.fetchedAt);
+        await this.db.call('favorites.updateSummary', {
+          profileId,
+          accountNo: row.account_no,
+          summaryJson: JSON.stringify(upgraded),
+        });
+        this.backfillMap.set(key, {
+          status: 'done',
+          attempts: 1,
+          nextRetryAt: 0,
+          lastError: null,
+        });
+        this.onChange();
+        continue;
+      }
+
+      if (hasFullInv) continue;
+
+      if (state) {
+        if (state.status === 'inflight' || state.status === 'done') continue;
+        if (
+          state.status === 'failed' &&
+          (state.attempts >= BACKFILL_MAX_ATTEMPTS || now < state.nextRetryAt)
+        ) {
+          continue;
+        }
+      }
+
+      const attempts = (state?.attempts ?? 0) + 1;
+      this.backfillMap.set(key, {
+        status: 'inflight',
+        attempts,
+        nextRetryAt: 0,
+        lastError: null,
+      });
+
+      void this.backfillOne(profileId, row.account_no, summary, attempts);
+    }
+  }
+
+  private async backfillOne(
+    profileId: string,
+    accountNo: string,
+    existingSummary: AccountSummary | null,
+    attempts: number,
+  ): Promise<void> {
+    const key = `${profileId}:${accountNo}`;
+    try {
+      const inv = await this.accounts.inventory(accountNo, {
+        priority: Priority.BACKGROUND,
+        group: 'favorites:backfill',
+      });
+      if (this.profile() !== profileId) {
+        this.backfillMap.delete(key);
+        return;
+      }
+      const base: AccountSummary = existingSummary ?? {
+        tags: [],
+        pricing: {
+          rentType: [],
+          prices: {},
+          firstPrices: {},
+          actPrices: {},
+          rentPeriod: null,
+          weekRange: { EARLY: [], NOON: [], NIGHT: [] },
+        },
+        thumbnail: null,
+        thumbnailSource: null,
+      };
+      const upgraded = applyInventoryToSummary(base, inv.items, inv.fetchedAt);
+      await this.db.call('favorites.updateSummary', {
+        profileId,
+        accountNo,
+        summaryJson: JSON.stringify(upgraded),
+      });
+      this.backfillMap.set(key, {
+        status: 'done',
+        attempts,
+        nextRetryAt: 0,
+        lastError: null,
+      });
+      this.onChange();
+    } catch (err) {
+      if (isCancelled(err)) {
+        this.backfillMap.delete(key);
+        return;
+      }
+      this.backfillMap.set(key, {
+        status: 'failed',
+        attempts,
+        nextRetryAt: this.now() + BACKFILL_RETRY_COOLDOWN_MS,
+        lastError: userMessage(err),
+      });
+    }
+  }
+
+  pauseBackfill() {
+    this.backfillPaused = true;
+    this.queue?.cancelGroup('favorites:backfill');
+  }
+
+  resumeBackfill() {
+    this.backfillPaused = false;
+    if (this.backfillPendingOnResume) {
+      this.backfillPendingOnResume = false;
+      this.scheduleBackfill();
+    }
+  }
+
+  backfillStatus(accountNo: string): BackfillEntry | null {
+    const profileId = this.profile();
+    if (!profileId) return null;
+    return this.backfillMap.get(`${profileId}:${accountNo}`) ?? null;
+  }
+
+  async view(opts?: { triggerBackfill?: boolean }): Promise<FavoritesView> {
     const id = this.profile();
     if (!id) {
       return {
@@ -278,12 +566,16 @@ export class FavoritesService {
       };
     }
     const data = await this.db.call('favorites.list', { profileId: id });
+    if (opts?.triggerBackfill) {
+      this.scheduleBackfill(data.favorites);
+    }
     const ops = new Map(data.syncOps.map((o) => [o.account_no, o]));
     const presets = new Map(data.presets.map((p) => [p.account_no, p]));
     const items: FavoriteView[] = data.favorites.map((row) => {
       let summary: AccountSummary | null = null;
       try {
-        summary = row.summary_json ? (JSON.parse(row.summary_json) as AccountSummary) : null;
+        const parsed = row.summary_json ? (JSON.parse(row.summary_json) as AccountSummary) : null;
+        summary = upgradeAccountSummary(parsed, row.checked_at ?? row.created_at);
       } catch {
         summary = null;
       }
@@ -317,6 +609,10 @@ export class FavoritesService {
         createdAt: row.created_at,
         tags: summary?.tags ?? [],
         thumbnail: summary?.thumbnail ?? null,
+        summaryVersion: summary?.summaryVersion ?? 2,
+        gridItems: summary?.gridItems ?? [],
+        summarySource: summary?.summarySource ?? 'display',
+        summaryUpdatedAt: summary?.summaryUpdatedAt ?? null,
         prices,
         preset,
         presetSummary: presetSummary(preset),
@@ -341,5 +637,7 @@ export class FavoritesService {
 
   reset() {
     this.lastSync = { at: null, ok: null, error: null };
+    this.backfillMap.clear();
+    this.queue?.cancelGroup('favorites:backfill');
   }
 }

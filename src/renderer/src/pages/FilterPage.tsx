@@ -1,5 +1,5 @@
-// P1 筛选主页：条件面板（同件条件行、行间交集、租期价格）+ 可中断扫描进度 + 卡片/紧凑列表结果。
-import { CloseOutlined, PlusOutlined } from '@ant-design/icons';
+// P1 筛选主页：条件面板（同件条件行、行间交集、租期价格、本地匹配）+ 可中断扫描进度 + 状态待确认折叠分组 + 卡片/列表结果。
+import { CloseOutlined, DownOutlined, PlusOutlined, RightOutlined } from '@ant-design/icons';
 import {
   App,
   Button,
@@ -25,8 +25,15 @@ import {
   categoryDisplay,
   SKIN_SUGGESTIONS,
 } from '../../../shared/catalog';
-import type { FilterPresetView, ScanResultView } from '../../../shared/dto';
-import { compareDecimalText, formatYuan } from '../../../shared/money';
+import {
+  type FilterPresetView,
+  partitionResultsForFilter,
+  type ScanResultView,
+  type SortKey,
+  type StatusFilter,
+  sortResultList,
+} from '../../../shared/dto';
+import { formatYuan } from '../../../shared/money';
 import { RENT_KINDS, RENT_META } from '../../../shared/rent';
 import { call } from '../api';
 import { ItemCard, StatusBadge, VirtualGrid } from '../components/common';
@@ -43,8 +50,7 @@ import {
 
 const PRICE_RE = /^\d{0,7}(\.\d{0,2})?$/;
 
-type SortKey = 'SCORE' | 'PRICE_ASC' | 'PRICE_DESC' | 'VALUE_ASC' | 'VALUE_DESC';
-type StatusFilter = 'AVAILABLE' | 'ALL' | 'RENTED' | 'OFF_SHELF';
+export { partitionResultsForFilter, type SortKey, type StatusFilter, sortResultList };
 
 interface CascadeOption {
   label: string;
@@ -75,10 +81,13 @@ function pathToId(path: (string | number)[]): string | null {
   return typeof last === 'string' ? last : null;
 }
 
-/** 只含大类、没有皮肤名称的行无法用关键词检索 */
+/** 只含未展开大类、没有皮肤名称的行无法用关键词检索（匕首与手套已支持大类展开） */
 function rowNeedsBrowse(row: { categoryIds: string[]; names: string[] }) {
   return (
-    row.names.length === 0 && row.categoryIds.some((id) => CATEGORY_BY_ID.get(id)?.kind === 'first')
+    row.names.length === 0 &&
+    row.categoryIds.some(
+      (id) => CATEGORY_BY_ID.get(id)?.kind === 'first' && id !== 'f:手套' && id !== 'f:匕首',
+    )
   );
 }
 
@@ -126,12 +135,28 @@ function ConditionPanel() {
       rows: f.rows.map((r) => (r.id === id ? { ...r, ...patch } : r)),
     }));
 
-  const start = async (next?: FilterForm) => {
+  const start = async (next?: FilterForm, forceRefresh = false) => {
     const f = next ?? form;
     try {
-      await call('scan.start', { conditions: formToConditions(f), presetId: f.presetId });
+      await call('scan.start', {
+        conditions: formToConditions(f),
+        presetId: f.presetId,
+        forceRefresh,
+      });
     } catch (error) {
       message.error((error as Error).message || '无法开始筛选');
+    }
+  };
+
+  const startLocal = async (next?: FilterForm) => {
+    const f = next ?? form;
+    try {
+      await call('scan.startLocal', {
+        conditions: formToConditions(f),
+        presetId: f.presetId,
+      });
+    } catch (error) {
+      message.error((error as Error).message || '无法执行本地匹配');
     }
   };
 
@@ -308,6 +333,9 @@ function ConditionPanel() {
         <Button type="primary" block disabled={invalid} onClick={() => void start()}>
           {active ? '重新筛选' : '开始筛选'}
         </Button>
+        <Button block disabled={invalid} onClick={() => void startLocal()}>
+          本地匹配
+        </Button>
         <Space style={{ width: '100%' }}>
           <Button onClick={() => setSaving(true)} disabled={invalid}>
             保存为方案
@@ -433,52 +461,27 @@ function SavePresetModal({
   );
 }
 
-function useSortedResults(sort: SortKey, statusFilter: StatusFilter) {
-  const scan = useUi((s) => s.scan);
-  return useMemo(() => {
-    if (!scan) return [];
-    const kind = scan.conditions?.rentKind ?? 'HOUR';
-    const priceOf = (r: ScanResultView) =>
-      r.account.prices.find((p) => p.kind === kind)?.price ?? null;
-    const list = scan.results.filter((r) => {
-      if (statusFilter === 'ALL') return true;
-      return r.account.status === statusFilter;
-    });
-    const sorted = [...list];
-    sorted.sort((a, b) => {
-      switch (sort) {
-        case 'SCORE':
-          return b.score - a.score || compareDecimalText(priceOf(a), priceOf(b));
-        case 'PRICE_ASC':
-          return compareDecimalText(priceOf(a), priceOf(b));
-        case 'PRICE_DESC':
-          return compareDecimalText(priceOf(b), priceOf(a));
-        case 'VALUE_ASC':
-          return compareDecimalText(a.account.value, b.account.value);
-        case 'VALUE_DESC':
-          return compareDecimalText(b.account.value, a.account.value);
-      }
-      return 0;
-    });
-    return sorted;
-  }, [scan, sort, statusFilter]);
-}
-
 function Results() {
   const scan = useUi((s) => s.scan);
   const status = useUi((s) => s.status);
   const settings = useUi((s) => s.settings);
   const setForm = useUi((s) => s.setForm);
   const hasItems = scan?.hasItemConditions ?? false;
-  const [sort, setSort] = useState<SortKey>('SCORE');
+  // A3（R04）：默认排序改为价格升序（PRICE_ASC）
+  const [sort, setSort] = useState<SortKey>('PRICE_ASC');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('AVAILABLE');
+  const [pendingExpanded, setPendingExpanded] = useState(true);
   const view = settings?.device.resultView ?? 'CARD';
-  useEffect(() => {
-    setSort(hasItems ? 'SCORE' : 'PRICE_ASC');
-  }, [hasItems]);
-  const results = useSortedResults(sort, statusFilter);
+
+  const rentKind = scan?.conditions?.rentKind ?? 'HOUR';
+  const { mainResults, pendingResults, availableCount, hiddenNonAvailableCount } = useMemo(
+    () => partitionResultsForFilter(scan?.results ?? [], sort, statusFilter, rentKind),
+    [scan?.results, sort, statusFilter, rentKind],
+  );
+
   const phase = scan?.phase ?? 'IDLE';
   const active = phase === 'CANDIDATES' || phase === 'VERIFYING';
+  const totalVisible = mainResults.length + pendingResults.length;
 
   const examples: { label: string; form: Partial<FilterForm> }[] = [
     { label: '蝴蝶刀 + 多普勒', form: { rows: [newRow(['w:蝴蝶刀'], ['多普勒'])] } },
@@ -488,6 +491,15 @@ function Results() {
     },
     { label: '多普勒 · 时租 ≤ ¥10', form: { rows: [newRow([], ['多普勒'])], priceMax: '10' } },
   ];
+
+  const emptyText =
+    scan?.emptyReason === 'NO_LOCAL_RECORDS'
+      ? '无本地记录'
+      : scan?.emptyReason === 'SOURCE_UNAVAILABLE'
+        ? '未完成：候选来源不可用'
+        : hiddenNonAvailableCount > 0 && statusFilter === 'AVAILABLE'
+          ? `已命中 ${hiddenNonAvailableCount} 个账号（均为租赁中或已下架，已在「仅可租」下隐藏）`
+          : '没有符合条件的账号';
 
   return (
     <section className="jh-results" aria-label="筛选结果">
@@ -501,9 +513,9 @@ function Results() {
               style={{ width: 132 }}
               aria-label="排序"
               options={[
-                ...(hasItems ? [{ value: 'SCORE' as SortKey, label: '匹配度' }] : []),
                 { value: 'PRICE_ASC', label: '价格↑' },
                 { value: 'PRICE_DESC', label: '价格↓' },
+                ...(hasItems ? [{ value: 'SCORE' as SortKey, label: '匹配度' }] : []),
                 { value: 'VALUE_ASC', label: '总价值↑' },
                 { value: 'VALUE_DESC', label: '总价值↓' },
               ]}
@@ -534,7 +546,19 @@ function Results() {
               }
             />
           </Space>
-          <span className="jh-small">当前显示 {results.length} 个</span>
+          <span className="jh-small">
+            {statusFilter === 'AVAILABLE' ? (
+              <>
+                当前可租 {availableCount} 个
+                {pendingResults.length > 0 ? ` · 状态待确认 ${pendingResults.length} 个` : ''}
+                {hiddenNonAvailableCount > 0
+                  ? `（已隐藏 ${hiddenNonAvailableCount} 个租赁中/已下架）`
+                  : ''}
+              </>
+            ) : (
+              <>当前显示 {mainResults.length} 个</>
+            )}
+          </span>
           <span className="jh-scope">
             本次搜索范围：平台候选 + 本地已知账号；不代表平台全部下架账号
           </span>
@@ -543,7 +567,7 @@ function Results() {
       <div className="jh-results-body">
         {phase === 'IDLE' ? (
           <div className="jh-empty">
-            <Empty description="设置条件后点击开始筛选" />
+            <Empty description="设置条件后点击开始筛选，或使用本地匹配查看已缓存结果" />
             <Space wrap style={{ justifyContent: 'center' }}>
               {examples.map((ex) => (
                 <Button
@@ -555,31 +579,69 @@ function Results() {
               ))}
             </Space>
             {status?.auth.phase !== 'OK' ? (
-              <div className="jh-hint">登录态就绪后才能筛选</div>
+              <div className="jh-hint">当前离线或登录态未就绪，仍可使用「本地匹配」</div>
             ) : null}
           </div>
-        ) : results.length === 0 && active ? (
-          <div className="jh-skeletons">
-            {[0, 1, 2, 3].map((i) => (
-              <Skeleton key={i} active paragraph={{ rows: 4 }} />
-            ))}
-          </div>
-        ) : results.length === 0 ? (
-          <div className="jh-empty">
-            <Empty description="没有符合条件的账号" />
-            <div className="jh-hint">建议：放宽价格 / 减少条件 / 状态选「全部」</div>
-          </div>
-        ) : view === 'CARD' ? (
-          <VirtualGrid
-            items={results}
-            minColumnWidth={250}
-            rowHeight={hasItems ? 300 : 236}
-            getKey={(r) => r.account.accountNo}
-            ariaLabel="结果卡片"
-            render={(r) => <ResultCard result={r} />}
-          />
         ) : (
-          <ResultList results={results} hasItems={hasItems} />
+          <>
+            {statusFilter === 'AVAILABLE' && pendingResults.length > 0 ? (
+              <section className="jh-pending-group" aria-label="已匹配，状态待确认分组">
+                <button
+                  type="button"
+                  className="jh-pending-head"
+                  aria-expanded={pendingExpanded}
+                  onClick={() => setPendingExpanded((e) => !e)}
+                >
+                  <Space size={6}>
+                    {pendingExpanded ? <DownOutlined /> : <RightOutlined />}
+                    <span>已匹配，状态待确认（{pendingResults.length}）</span>
+                    <span className="jh-small">状态确认后可租账号会自动移入下方「仅可租」列表</span>
+                  </Space>
+                </button>
+                {pendingExpanded ? (
+                  <div className="jh-pending-grid">
+                    {pendingResults.map((r) => (
+                      <div key={r.account.accountNo} className="jh-pending-cell">
+                        <ResultCard result={r} />
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
+
+            {totalVisible === 0 && hiddenNonAvailableCount === 0 && active ? (
+              <div className="jh-skeletons">
+                {[0, 1, 2, 3].map((i) => (
+                  <Skeleton key={i} active paragraph={{ rows: 4 }} />
+                ))}
+              </div>
+            ) : mainResults.length === 0 && pendingResults.length === 0 ? (
+              <div className="jh-empty">
+                <Empty description={emptyText} />
+                <div className="jh-hint">
+                  {hiddenNonAvailableCount > 0 && statusFilter === 'AVAILABLE' ? (
+                    <Button size="small" type="link" onClick={() => setStatusFilter('ALL')}>
+                      切换到「全部」查看已命中的 {hiddenNonAvailableCount} 个账号
+                    </Button>
+                  ) : (
+                    '建议：放宽价格 / 减少条件 / 状态选「全部」'
+                  )}
+                </div>
+              </div>
+            ) : mainResults.length === 0 ? null : view === 'CARD' ? (
+              <VirtualGrid
+                items={mainResults}
+                minColumnWidth={250}
+                rowHeight={hasItems ? 300 : 236}
+                getKey={(r) => r.account.accountNo}
+                ariaLabel="结果卡片"
+                render={(r) => <ResultCard result={r} />}
+              />
+            ) : (
+              <ResultList results={mainResults} hasItems={hasItems} />
+            )}
+          </>
         )}
       </div>
     </section>
@@ -589,22 +651,50 @@ function Results() {
 function ScanHeader() {
   const scan = useUi((s) => s.scan);
   const status = useUi((s) => s.status);
+  const form = useUi((s) => s.form);
   if (!scan || scan.phase === 'IDLE') return null;
-  const pct = scan.candidates > 0 ? Math.round((scan.confirmed / scan.candidates) * 100) : 0;
+
+  const discoveryDone = Boolean(scan.discoveryComplete);
+  const pct =
+    discoveryDone && scan.candidates > 0 ? Math.round((scan.confirmed / scan.candidates) * 100) : 0;
   const waiting = status?.requests.waitingMs ?? 0;
   const paused = status?.requests.pausedReason;
   const count = scan.results.length;
+  const checkedCount = scan.checkedCount ?? scan.confirmed;
+  const pendingCount = scan.pendingCount ?? Math.max(0, scan.candidates - scan.confirmed);
+  const failedPageCount = scan.failedPages?.length ?? 0;
+  const hasFailures = scan.failedAccounts.length > 0 || failedPageCount > 0;
+  const partialText =
+    scan.partialReasons && scan.partialReasons.length > 0
+      ? `（${scan.partialReasons.join('、')}）`
+      : '';
+
   return (
     <div className="jh-scan-head" aria-live="polite">
       {scan.phase === 'CANDIDATES' ? (
-        <span>正在获取候选账号…</span>
+        <>
+          <span>
+            正在获取候选账号… 已展示 {count} 个匹配
+            {checkedCount > 0 ? ` · 已检查 ${checkedCount}` : ''}
+          </span>
+          <Button size="small" onClick={() => void call('scan.stop')}>
+            停止
+          </Button>
+        </>
       ) : scan.phase === 'VERIFYING' ? (
         <>
           <span>
-            {scan.hasItemConditions ? '已确认库存' : '已确认状态'} {scan.confirmed} / 候选{' '}
-            {scan.candidates}
+            {scan.hasItemConditions ? '确认中' : '状态确认中'} · 已检查 {checkedCount} / 待检查{' '}
+            {pendingCount}（候选 {scan.candidates}）
           </span>
-          <Progress percent={pct} size="small" style={{ width: 180, margin: 0 }} showInfo={false} />
+          {discoveryDone ? (
+            <Progress
+              percent={pct}
+              size="small"
+              style={{ width: 160, margin: 0 }}
+              showInfo={false}
+            />
+          ) : null}
           <Button size="small" onClick={() => void call('scan.stop')}>
             停止
           </Button>
@@ -612,16 +702,26 @@ function ScanHeader() {
       ) : scan.phase === 'COMPLETE' ? (
         <span>
           共 {count} 个符合条件的账号 · 完成于 {formatTime(scan.finishedAt)}
-          {scan.incomplete ? (
-            <Tag color="orange" style={{ marginLeft: 8 }}>
-              结果不完整
+          {scan.localOnly ? (
+            <Tag color="blue" style={{ marginLeft: 8 }}>
+              本地匹配
             </Tag>
-          ) : null}
+          ) : scan.coverageComplete && !scan.incomplete ? (
+            <Tag color="green" style={{ marginLeft: 8 }}>
+              覆盖完整
+            </Tag>
+          ) : (
+            <Tag color="orange" style={{ marginLeft: 8 }}>
+              结果不完整{partialText}
+            </Tag>
+          )}
         </span>
       ) : scan.phase === 'STOPPED' ? (
         <>
           <span>
-            已停止 · 已确认 {scan.confirmed}/{scan.candidates}，结果可能不完整
+            已停止 ·{' '}
+            {discoveryDone ? `已确认 ${checkedCount}/${scan.candidates}` : '候选获取未结束'}
+            ，结果不完整{partialText}
             {scan.error ? `（${scan.error}）` : ''}
           </span>
           <Button size="small" type="primary" onClick={() => void call('scan.continue')}>
@@ -636,15 +736,43 @@ function ScanHeader() {
           </Button>
         </>
       )}
+
+      {scan.fromCache && scan.snapshotAt ? (
+        <Space size={6}>
+          <span className="jh-small">候选快照：{formatTime(scan.snapshotAt)}</span>
+          {status?.auth.phase === 'OK' ? (
+            <Button
+              size="small"
+              onClick={() =>
+                void call('scan.start', {
+                  conditions: scan.conditions ?? formToConditions(form),
+                  presetId: form.presetId,
+                  forceRefresh: true,
+                })
+              }
+            >
+              刷新最新
+            </Button>
+          ) : null}
+        </Space>
+      ) : null}
+
       {scan.phase === 'VERIFYING' && waiting > 0 ? (
         <Tag>限速等待 {Math.ceil(waiting / 1000)}s</Tag>
       ) : null}
       {paused && (scan.phase === 'VERIFYING' || scan.phase === 'CANDIDATES') ? (
         <Tag color="orange">{paused}</Tag>
       ) : null}
-      {scan.failedAccounts.length > 0 && (scan.phase === 'COMPLETE' || scan.phase === 'STOPPED') ? (
+      {hasFailures && (scan.phase === 'COMPLETE' || scan.phase === 'STOPPED') ? (
         <Button size="small" onClick={() => void call('scan.retryFailed')}>
-          重试失败的 {scan.failedAccounts.length} 个账号
+          重试失败项（
+          {[
+            failedPageCount > 0 ? `${failedPageCount} 页` : null,
+            scan.failedAccounts.length > 0 ? `${scan.failedAccounts.length} 个账号` : null,
+          ]
+            .filter(Boolean)
+            .join(' + ')}
+          ）
         </Button>
       ) : null}
       {scan.warnings.map((w) => (
@@ -678,7 +806,9 @@ function ResultCard({ result }: { result: ScanResultView }) {
   const current = a.prices.find((p) => p.kind === kind);
   const others = a.prices.filter((p) => p.kind !== kind && p.supported);
   const shown = result.hitItems.length > 0 ? result.hitItems : a.displayItems.slice(0, 4);
-  const more = Math.max(0, (result.hitCount || 0) - shown.length);
+  const more = result.hitCount != null ? Math.max(0, result.hitCount - shown.length) : 0;
+  const isSearchEvidence = result.evidence === 'search' || result.hitCount === null;
+
   return (
     // biome-ignore lint/a11y/useSemanticElements: 卡片内含收藏按钮，不能嵌套在 <button> 中
     <div
@@ -698,6 +828,9 @@ function ResultCard({ result }: { result: ScanResultView }) {
       <div className="jh-card-sub">
         <StatusBadge status={a.status} expireTimeMs={a.expireTimeMs} />
         {result.origin === 'local' ? <Tag>本地已知</Tag> : null}
+        {result.fromHistory ? <Tag>上次结果</Tag> : null}
+        {result.reverifyFailed ? <Tag color="orange">未能复核</Tag> : null}
+        {result.stale ? <Tag color="blue">历史/待核验</Tag> : null}
         {a.couponAllowed ? <Tag color="purple">券</Tag> : null}
       </div>
       <Tooltip title={a.tags.join(' / ')}>
@@ -720,7 +853,11 @@ function ResultCard({ result }: { result: ScanResultView }) {
           </Button>
         ) : null}
       </div>
-      {scan?.hasItemConditions ? <div className="jh-small">命中 {result.hitCount} 件</div> : null}
+      {scan?.hasItemConditions ? (
+        <div className="jh-small">
+          {isSearchEvidence ? '类别条件匹配，库存详情按需加载' : `命中 ${result.hitCount} 件`}
+        </div>
+      ) : null}
       <div className="jh-card-foot">
         <span className="jh-small">总值 {formatYuan(a.value)}</span>
         <span className="jh-price jh-num">
@@ -769,6 +906,7 @@ function ResultList({ results, hasItems }: { results: ScanResultView[]; hasItems
         render={(r) => {
           const shown =
             r.hitItems.length > 0 ? r.hitItems.slice(0, 3) : r.account.displayItems.slice(0, 3);
+          const isSearchEvidence = r.evidence === 'search' || r.hitCount === null;
           return (
             // biome-ignore lint/a11y/useSemanticElements: 行内含收藏按钮，不能嵌套在 <button> 中
             <div
@@ -787,11 +925,21 @@ function ResultList({ results, hasItems }: { results: ScanResultView[]; hasItems
                 {shown.map((i) => (
                   <ItemCard key={i.key} item={i} compact hit={r.hitItems.length > 0} />
                 ))}
-                {r.hitCount > shown.length ? (
+                {r.hitCount != null && r.hitCount > shown.length ? (
                   <span className="jh-small">+{r.hitCount - shown.length}</span>
                 ) : null}
               </span>
-              {hasItems ? <span className="jh-num">{r.hitCount}</span> : null}
+              {hasItems ? (
+                <span className="jh-num">
+                  {isSearchEvidence ? (
+                    <Tooltip title="类别条件匹配，库存详情按需加载">
+                      <span className="jh-small">未计算</span>
+                    </Tooltip>
+                  ) : (
+                    r.hitCount
+                  )}
+                </span>
+              ) : null}
               <span className="jh-num jh-price">{priceLine(r, kind)}</span>
               <span className="jh-num">{formatYuan(r.account.value)}</span>
               <span className="jh-tagline">{r.account.tags.join(' / ')}</span>
