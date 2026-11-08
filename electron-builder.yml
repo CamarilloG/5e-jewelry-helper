@@ -1,0 +1,52 @@
+appId: io.github.camarillog.jewelryhelper
+productName: 饰品驿站助手
+executableName: JewelryHelper
+copyright: Copyright © 2026 5e-jewelry-helper contributors
+directories:
+  output: release/${version}
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+  - '!out/main/preview.js'
+  - '!node_modules/**/*'
+extraResources:
+  - from: native/auth-reader/dist/auth-reader.exe
+    to: auth-reader.exe
+  - from: release-meta/THIRD_PARTY_LICENSES.txt
+    to: THIRD_PARTY_LICENSES.txt
+  - from: LICENSE
+    to: LICENSE.txt
+asar: true
+asarUnpack:
+  - out/main/dbWorker.js
+  - out/main/chunks/**
+npmRebuild: false
+protocols:
+  - name: 饰品驿站助手通知
+    schemes:
+      - jewelry-helper
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.ico
+  signExecutable: false
+  artifactName: JewelryHelper-Setup-${version}-x64.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: false
+  createStartMenuShortcut: true
+  shortcutName: 饰品驿站助手
+  runAfterFinish: true
+  deleteAppDataOnUninstall: false
+  include: build/installer.nsh
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  language: '2052'
+  unicode: true
+  warningsAsErrors: false

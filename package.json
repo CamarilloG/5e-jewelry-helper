@@ -1,0 +1,47 @@
+{
+  "name": "5e-jewelry-helper",
+  "productName": "饰品驿站助手",
+  "version": "1.0.0",
+  "private": true,
+  "description": "5E 饰品驿站第三方桌面助手：组合筛选、收藏监测与手动出码",
+  "author": "5e-jewelry-helper contributors",
+  "license": "MIT",
+  "homepage": "https://github.com/CamarilloG/5e-jewelry-helper",
+  "main": "out/main/index.js",
+  "engines": {
+    "node": ">=24.14.0"
+  },
+  "scripts": {
+    "dev": "electron-vite dev",
+    "typecheck": "node scripts/typecheck.mjs",
+    "lint": "biome check src tests scripts electron.vite.config.ts vitest.config.mts",
+    "format": "biome format --write src tests scripts electron.vite.config.ts vitest.config.mts",
+    "test": "vitest run",
+    "test:auth": "node scripts/test-auth.mjs",
+    "build:auth": "node scripts/build-auth.mjs",
+    "build": "electron-vite build",
+    "preview:offline": "electron-vite build && node out/main/preview.js",
+    "package:win": "node scripts/package-win.mjs"
+  },
+  "dependencies": {
+    "@ant-design/icons": "6.3.4",
+    "antd": "6.7.0",
+    "decimal.js": "10.6.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "zod": "4.6.7",
+    "zustand": "5.1.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.6",
+    "@types/node": "24.19.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "electron": "45.2.3",
+    "electron-builder": "26.18.0",
+    "electron-vite": "6.0.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.6",
+    "vitest": "5.1.0"
+  }
+}
