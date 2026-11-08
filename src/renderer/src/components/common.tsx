@@ -3,6 +3,7 @@ import { Tag, Tooltip } from 'antd';
 import {
   type CSSProperties,
   type ReactNode,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -179,7 +180,10 @@ export function SourceTag({ children, color }: { children: ReactNode; color?: st
   );
 }
 
-/** 虚拟滚动网格：按容器宽度计算列数，只渲染可见行。 */
+/**
+ * 虚拟滚动网格：按容器宽度计算列数，只渲染可见行。
+ * 传 scrollParent 时不自带滚动条，跟随外层滚动容器；null 表示外层容器尚未挂载。
+ */
 export function VirtualGrid<T>({
   items,
   minColumnWidth,
@@ -188,6 +192,7 @@ export function VirtualGrid<T>({
   render,
   getKey,
   ariaLabel,
+  scrollParent,
 }: {
   items: T[];
   minColumnWidth: number;
@@ -196,19 +201,39 @@ export function VirtualGrid<T>({
   render: (item: T, index: number) => ReactNode;
   getKey: (item: T) => string;
   ariaLabel?: string;
+  scrollParent?: HTMLElement | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 800, height: 600 });
   const [scrollTop, setScrollTop] = useState(0);
+  const measure = useCallback(() => {
+    const el = ref.current;
+    if (!el || scrollParent === null) return;
+    const viewport = scrollParent ?? el;
+    const width = el.clientWidth;
+    const height = viewport.clientHeight;
+    setSize((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
+    setScrollTop(
+      scrollParent
+        ? Math.max(0, scrollParent.getBoundingClientRect().top - el.getBoundingClientRect().top)
+        : el.scrollTop,
+    );
+  }, [scrollParent]);
   useLayoutEffect(() => {
     const el = ref.current;
-    if (!el) return;
-    const update = () => setSize({ width: el.clientWidth, height: el.clientHeight });
-    update();
-    const observer = new ResizeObserver(update);
+    if (!el || scrollParent === null) return;
+    const viewport = scrollParent ?? el;
+    const observer = new ResizeObserver(measure);
     observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
+    if (viewport !== el) observer.observe(viewport);
+    viewport.addEventListener('scroll', measure, { passive: true });
+    return () => {
+      observer.disconnect();
+      viewport.removeEventListener('scroll', measure);
+    };
+  }, [measure, scrollParent]);
+  // 上方内容展开或收起时，网格相对滚动容器的位置会变化
+  useLayoutEffect(measure);
   const columns = Math.max(1, Math.floor((size.width + gap) / (minColumnWidth + gap)));
   const rows = Math.ceil(items.length / columns);
   const stride = rowHeight + gap;
@@ -239,9 +264,8 @@ export function VirtualGrid<T>({
   return (
     <section
       ref={ref}
-      className="jh-virtual"
+      className={scrollParent === undefined ? 'jh-virtual' : 'jh-virtual-inline'}
       aria-label={ariaLabel}
-      onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
     >
       <div style={{ position: 'relative', height: Math.max(0, rows * stride - gap) }}>
         {visible}

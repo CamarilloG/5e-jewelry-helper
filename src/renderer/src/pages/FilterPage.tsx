@@ -1,5 +1,11 @@
 // P1 筛选主页：条件面板（同件条件行、行间交集、租期价格、本地匹配）+ 可中断扫描进度 + 状态待确认折叠分组 + 卡片/列表结果。
-import { CloseOutlined, DownOutlined, PlusOutlined, RightOutlined } from '@ant-design/icons';
+import {
+  CloseOutlined,
+  DownOutlined,
+  InfoCircleOutlined,
+  PlusOutlined,
+  RightOutlined,
+} from '@ant-design/icons';
 import {
   App,
   Button,
@@ -52,6 +58,8 @@ import {
 const PRICE_RE = /^\d{0,7}(\.\d{0,2})?$/;
 
 const CARD_ITEM_SLOTS = 4;
+const CARD_HEIGHT = 222;
+const CARD_HEIGHT_WITH_HITS = 244;
 const LIST_ITEM_SLOTS = 3;
 
 export { partitionResultsForFilter, type SortKey, type StatusFilter, sortResultList };
@@ -325,7 +333,11 @@ function ConditionPanel() {
           onChange={(e) => setForm((f) => ({ ...f, priceMax: e.target.value.trim() }))}
         />
       </Space.Compact>
-      {priceInvalid(form) ? <div className="jh-error-text">价格下限不能大于上限</div> : null}
+      {!PRICE_RE.test(form.priceMin) || !PRICE_RE.test(form.priceMax) ? (
+        <div className="jh-error-text">价格只能填写数字，最多 2 位小数</div>
+      ) : priceInvalid(form) ? (
+        <div className="jh-error-text">价格下限不能大于上限</div>
+      ) : null}
       <Checkbox
         style={{ marginTop: 10 }}
         checked={form.couponOnly}
@@ -475,6 +487,7 @@ function Results() {
   const [sort, setSort] = useState<SortKey>('PRICE_ASC');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('AVAILABLE');
   const [pendingExpanded, setPendingExpanded] = useState(true);
+  const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
   const view = settings?.device.resultView ?? 'CARD';
 
   const rentKind = scan?.conditions?.rentKind ?? 'HOUR';
@@ -486,6 +499,7 @@ function Results() {
   const phase = scan?.phase ?? 'IDLE';
   const active = phase === 'CANDIDATES' || phase === 'VERIFYING';
   const totalVisible = mainResults.length + pendingResults.length;
+  const cardHeight = hasItems ? CARD_HEIGHT_WITH_HITS : CARD_HEIGHT;
 
   const examples: { label: string; form: Partial<FilterForm> }[] = [
     { label: '蝴蝶刀 + 多普勒', form: { rows: [newRow(['w:蝴蝶刀'], ['多普勒'])] } },
@@ -514,7 +528,7 @@ function Results() {
             <Select<SortKey>
               value={sort}
               onChange={setSort}
-              style={{ width: 132 }}
+              style={{ width: 108 }}
               aria-label="排序"
               options={[
                 { value: 'PRICE_ASC', label: '价格↑' },
@@ -527,7 +541,7 @@ function Results() {
             <Select<StatusFilter>
               value={statusFilter}
               onChange={setStatusFilter}
-              style={{ width: 120 }}
+              style={{ width: 96 }}
               aria-label="状态过滤"
               options={[
                 { value: 'AVAILABLE', label: '仅可租' },
@@ -562,13 +576,13 @@ function Results() {
             ) : (
               <>当前显示 {mainResults.length} 个</>
             )}
-          </span>
-          <span className="jh-scope">
-            本次搜索范围：平台候选 + 本地已知账号；不代表平台全部下架账号
+            <Tooltip title="本次搜索范围：平台候选 + 本地已知账号；不代表平台全部下架账号">
+              <InfoCircleOutlined className="jh-scope-icon" aria-label="搜索范围说明" />
+            </Tooltip>
           </span>
         </div>
       ) : null}
-      <div className="jh-results-body">
+      <div className="jh-results-body" ref={setScroller}>
         {phase === 'IDLE' ? (
           <div className="jh-empty">
             <Empty description="设置条件后点击开始筛选，或使用本地匹配查看已缓存结果" />
@@ -603,12 +617,16 @@ function Results() {
                   </Space>
                 </button>
                 {pendingExpanded ? (
-                  <div className="jh-pending-grid">
-                    {pendingResults.map((r) => (
-                      <div key={r.account.accountNo} className="jh-pending-cell">
-                        <ResultCard result={r} />
-                      </div>
-                    ))}
+                  <div className="jh-pending-body">
+                    <VirtualGrid
+                      items={pendingResults}
+                      minColumnWidth={250}
+                      rowHeight={cardHeight}
+                      getKey={(r) => r.account.accountNo}
+                      ariaLabel="状态待确认结果"
+                      render={(r) => <ResultCard result={r} />}
+                      scrollParent={scroller}
+                    />
                   </div>
                 ) : null}
               </section>
@@ -637,13 +655,14 @@ function Results() {
               <VirtualGrid
                 items={mainResults}
                 minColumnWidth={250}
-                rowHeight={hasItems ? 300 : 236}
+                rowHeight={cardHeight}
                 getKey={(r) => r.account.accountNo}
                 ariaLabel="结果卡片"
                 render={(r) => <ResultCard result={r} />}
+                scrollParent={scroller}
               />
             ) : (
-              <ResultList results={mainResults} hasItems={hasItems} />
+              <ResultList results={mainResults} hasItems={hasItems} scrollParent={scroller} />
             )}
           </>
         )}
@@ -889,7 +908,15 @@ function ResultCard({ result }: { result: ScanResultView }) {
   );
 }
 
-function ResultList({ results, hasItems }: { results: ScanResultView[]; hasItems: boolean }) {
+function ResultList({
+  results,
+  hasItems,
+  scrollParent,
+}: {
+  results: ScanResultView[];
+  hasItems: boolean;
+  scrollParent: HTMLElement | null;
+}) {
   const scan = useUi((s) => s.scan);
   const kind = scan?.conditions?.rentKind ?? 'HOUR';
   const favorites = useFavoriteSet();
@@ -900,8 +927,8 @@ function ResultList({ results, hasItems }: { results: ScanResultView[]; hasItems
         <span />
         <span>账号编号</span>
         <span>状态</span>
-        <span>命中饰品</span>
-        {hasItems ? <span>命中件数</span> : null}
+        <span>{hasItems ? '命中饰品' : '饰品'}</span>
+        {hasItems ? <span>命中</span> : null}
         <span>{RENT_META[kind].label}单价</span>
         <span>总价值</span>
         <span>卖点</span>
@@ -913,6 +940,7 @@ function ResultList({ results, hasItems }: { results: ScanResultView[]; hasItems
         gap={0}
         getKey={(r) => r.account.accountNo}
         ariaLabel="结果列表"
+        scrollParent={scrollParent}
         render={(r) => {
           const shown = resultDisplayItems(r.hitItems, fillCandidates(r), LIST_ITEM_SLOTS);
           const hitKeys = new Set(r.hitItems.map((i) => i.key));

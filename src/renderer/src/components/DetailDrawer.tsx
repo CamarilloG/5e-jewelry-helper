@@ -104,7 +104,7 @@ export function DetailDrawer() {
       destroyOnHidden
       className="jh-drawer"
       rootClassName="jh-drawer-root"
-      styles={{ body: { padding: 0 } }}
+      styles={{ body: { padding: 0, overflow: 'hidden' } }}
     >
       <button
         type="button"
@@ -142,6 +142,7 @@ function DetailBody({ onClose }: { onClose: () => void }) {
   );
   useEffect(() => load(false), [load]);
   const inventoryRef = useRef<HTMLDivElement>(null);
+  const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     if (drawer?.focusInventory && detail) inventoryRef.current?.scrollIntoView({ block: 'start' });
   }, [drawer?.focusInventory, detail]);
@@ -175,40 +176,46 @@ function DetailBody({ onClose }: { onClose: () => void }) {
           <Button type="text" icon={<CloseOutlined />} aria-label="关闭详情" onClick={onClose} />
         </Space>
       </header>
-      {detailError ? (
-        <div className="jh-pad">
-          <Empty description={`详情加载失败 · ${detailError}`}>
-            <Button onClick={() => load(true)}>重试</Button>
-          </Empty>
-        </div>
-      ) : !detail ? (
-        <div className="jh-pad">
-          <Skeleton active paragraph={{ rows: 8 }} />
-        </div>
-      ) : (
-        <>
-          <section className="jh-pad">
-            <StatusBadge
-              status={detail.account.status}
-              expireTimeMs={detail.account.expireTimeMs}
-            />
-            <div className="jh-tags-all">卖点：{detail.account.tags.join(' / ') || '—'}</div>
-            <div className="jh-small">
-              总价值{' '}
-              <span className="jh-num">{formatYuan(detail.account.value, { compact: false })}</span>
-            </div>
-          </section>
-          <PriceTable detail={detail} />
-          <div ref={inventoryRef}>
-            <Inventory accountNo={accountNo} hitKeys={drawer?.hitKeys ?? null} />
+      <div className="jh-detail-scroll" ref={setScroller}>
+        {detailError ? (
+          <div className="jh-pad">
+            <Empty description={`详情加载失败 · ${detailError}`}>
+              <Button onClick={() => load(true)}>重试</Button>
+            </Empty>
           </div>
-          <OrderArea
-            detail={detail}
-            reload={() => load(true)}
-            authOk={status?.auth.phase === 'OK'}
-          />
-        </>
-      )}
+        ) : !detail ? (
+          <div className="jh-pad">
+            <Skeleton active paragraph={{ rows: 8 }} />
+          </div>
+        ) : (
+          <>
+            <section className="jh-pad">
+              <StatusBadge
+                status={detail.account.status}
+                expireTimeMs={detail.account.expireTimeMs}
+              />
+              <div className="jh-tags-all">卖点：{detail.account.tags.join(' / ') || '—'}</div>
+              <div className="jh-small">
+                总价值{' '}
+                <span className="jh-num">
+                  {formatYuan(detail.account.value, { compact: false })}
+                </span>
+              </div>
+            </section>
+            <PriceTable detail={detail} />
+            <div ref={inventoryRef}>
+              <Inventory
+                accountNo={accountNo}
+                hitKeys={drawer?.hitKeys ?? null}
+                scrollParent={scroller}
+              />
+            </div>
+          </>
+        )}
+      </div>
+      {detail && !detailError ? (
+        <OrderArea detail={detail} reload={() => load(true)} authOk={status?.auth.phase === 'OK'} />
+      ) : null}
     </div>
   );
 }
@@ -246,7 +253,15 @@ function PriceTable({ detail }: { detail: DetailView }) {
 
 type InvSort = 'PRICE' | 'RARITY' | 'NAME';
 
-function Inventory({ accountNo, hitKeys }: { accountNo: string; hitKeys: string[] | null }) {
+function Inventory({
+  accountNo,
+  hitKeys,
+  scrollParent,
+}: {
+  accountNo: string;
+  hitKeys: string[] | null;
+  scrollParent: HTMLElement | null;
+}) {
   const [inv, setInv] = useState<InventoryView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<'ALL' | 'HIT'>('ALL');
@@ -346,17 +361,16 @@ function Inventory({ accountNo, hitKeys }: { accountNo: string; hitKeys: string[
       ) : items.length === 0 ? (
         <Empty description="没有饰品" image={Empty.PRESENTED_IMAGE_SIMPLE} />
       ) : (
-        <div style={{ height: Math.min(520, Math.ceil(items.length / 3) * 196 + 8) }}>
-          <VirtualGrid
-            items={items}
-            minColumnWidth={118}
-            rowHeight={184}
-            gap={8}
-            getKey={(i) => i.key}
-            ariaLabel="完整库存"
-            render={(item) => <ItemCard item={item} hit={hits.has(item.key)} />}
-          />
-        </div>
+        <VirtualGrid
+          items={items}
+          minColumnWidth={118}
+          rowHeight={184}
+          gap={8}
+          getKey={(i) => i.key}
+          ariaLabel="完整库存"
+          render={(item) => <ItemCard item={item} hit={hits.has(item.key)} />}
+          scrollParent={scrollParent}
+        />
       )}
       {inv?.fromCache ? <div className="jh-hint">库存来自本地缓存，可点刷新重新读取</div> : null}
     </section>
@@ -416,7 +430,7 @@ function OrderArea({
     }
   };
   return (
-    <section className="jh-pad jh-section jh-order">
+    <section className="jh-order" aria-label="下单">
       <div className="jh-section-title">下单</div>
       <OrderParamsFields detail={detail} value={params} onChange={setParams} />
       <QuoteLine quote={quote} loading={loading} />
@@ -449,7 +463,12 @@ function OrderArea({
         >
           一键出码
         </Button>
-        <div className="jh-warn-small">将创建订单并占用账号</div>
+        <div className="jh-order-foot">
+          <span className="jh-warn-small">将创建订单并占用账号</span>
+          <Button size="small" type="link" onClick={reload}>
+            刷新账号信息
+          </Button>
+        </div>
         {blocked ? <div className="jh-error-text">{blocked}</div> : null}
         {detail.favorite ? (
           <div className="jh-hint">
@@ -467,9 +486,6 @@ function OrderArea({
             </Button>
           </div>
         ) : null}
-        <Button size="small" type="link" onClick={reload}>
-          刷新账号信息
-        </Button>
       </Space>
     </section>
   );
