@@ -330,8 +330,32 @@ export type NavigateTarget =
   | { page: 'PRESETS' }
   | { page: 'SETTINGS'; section?: string };
 
+export type UpdatePhase =
+  | 'IDLE'
+  | 'CHECKING'
+  | 'LATEST'
+  | 'AVAILABLE'
+  | 'DOWNLOADING'
+  | 'DOWNLOADED'
+  | 'ERROR';
+
+export interface UpdateView {
+  /** 开发环境和离线安装形态没有更新器时为 false */
+  supported: boolean;
+  phase: UpdatePhase;
+  currentVersion: string;
+  version: string | null;
+  notes: string | null;
+  percent: number | null;
+  error: string | null;
+  errorDuring: 'CHECK' | 'DOWNLOAD' | null;
+}
+
+export type UpdateInstallResult = { ok: true } | { ok: false; reason: string };
+
 export type MainEvent =
   | { type: 'status'; payload: StatusView }
+  | { type: 'update'; payload: UpdateView }
   | { type: 'scan'; payload: ScanView }
   | { type: 'favorites'; payload: FavoritesView }
   | { type: 'checkout'; payload: CheckoutView | null }
@@ -346,6 +370,7 @@ export type MainEvent =
 export type MainEventType = MainEvent['type'];
 export const MAIN_EVENT_TYPES: MainEventType[] = [
   'status',
+  'update',
   'scan',
   'favorites',
   'checkout',

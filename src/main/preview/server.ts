@@ -8,6 +8,7 @@ import type { MainEvent } from '../../shared/dto';
 import { IPC_CHANNELS, type IpcChannel, ipcInputs } from '../../shared/ipc';
 import { AppController, describeError } from '../controller';
 import { nullLogger } from '../logger';
+import type { UpdaterDriver } from '../services/update-service';
 import { InlineDbClient } from '../storage/client';
 import { FakePlatform } from './fake-platform';
 
@@ -45,6 +46,25 @@ async function main() {
     },
   ];
   const notifications: string[] = [];
+  const updateDemo = { mode: 'latest' };
+  const updater: UpdaterDriver = {
+    check: async () => {
+      if (updateDemo.mode === 'check-fail') throw new Error('net::ERR_INTERNET_DISCONNECTED');
+      return updateDemo.mode === 'latest'
+        ? null
+        : { version: '9.9.9', notes: '预览用更新说明\n第二行内容' };
+    },
+    download: async (progress) => {
+      for (const percent of [15, 40, 70, 100]) {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        if (updateDemo.mode === 'download-fail' && percent > 40) {
+          throw Object.assign(new Error('checksum mismatch'), { code: 'ERR_CHECKSUM_MISMATCH' });
+        }
+        progress(percent);
+      }
+    },
+    quitAndInstall: () => {},
+  };
   const db = await InlineDbClient.open(dbFile);
   const clients = new Set<http.ServerResponse>();
   const controller = new AppController({
@@ -63,6 +83,7 @@ async function main() {
     images: null,
     loadPaymentImage: async (url) => url,
     appVersion: '1.0.0-preview',
+    updater,
     shell: {
       openExternal: async () => {},
       chooseDirectory: async () => null,
@@ -72,6 +93,7 @@ async function main() {
         return file;
       },
       confirmQuit: () => {},
+      installUpdate: () => notifications.push('update-install-requested'),
       showWindow: () => {},
     },
   });
@@ -114,6 +136,10 @@ async function main() {
     if (url.pathname.startsWith('/dev/')) {
       const action = url.pathname.slice(5);
       const no = url.searchParams.get('account') ?? '';
+      if (action === 'update') {
+        updateDemo.mode = url.searchParams.get('mode') ?? 'latest';
+        return json(res, updateDemo.mode);
+      }
       if (action === 'pay') return json(res, fake.pay());
       if (action === 'expire') return json(res, fake.expire());
       if (action === 'available') {

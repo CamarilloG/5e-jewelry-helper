@@ -7,6 +7,7 @@ import type {
   ScanView,
   SettingsView,
   StatusView,
+  UpdateView,
 } from '../../shared/dto';
 
 export type Page = 'FILTER' | 'FAVORITES' | 'PRESETS' | 'SETTINGS';
@@ -92,6 +93,7 @@ export function conditionsToForm(
 interface UiState {
   page: Page;
   status: StatusView | null;
+  update: UpdateView | null;
   scan: ScanView | null;
   favorites: FavoritesView | null;
   checkout: CheckoutView | null;
@@ -112,6 +114,7 @@ interface UiState {
 export const useUi = create<UiState>((set) => ({
   page: 'FILTER',
   status: null,
+  update: null,
   scan: null,
   favorites: null,
   checkout: null,

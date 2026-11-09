@@ -23,6 +23,7 @@ import {
   type OrderPreset,
 } from '../../../shared/settings';
 import { call } from '../api';
+import { UpdatePanel } from '../components/UpdateControls';
 import { formatBytes, formatTime, relativeTime } from '../format';
 import { useUi } from '../store';
 
@@ -327,9 +328,8 @@ export function SettingsPage() {
           <Row label="开源仓库">
             <Typography.Text copyable>{settings.repoUrl}</Typography.Text>
           </Row>
-          <Row label="检查更新">
-            <Button onClick={() => void call('app.openReleases')}>打开 GitHub 发布页</Button>
-            <span className="jh-hint">不后台联网检查、不自动下载</span>
+          <Row label="在线更新">
+            <UpdatePanel />
           </Row>
           <Row label="帮助">
             <Button onClick={() => void call('app.openHelp')}>查看帮助</Button>

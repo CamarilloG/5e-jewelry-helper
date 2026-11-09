@@ -12,6 +12,8 @@ import type {
   ScanView,
   SettingsView,
   StatusView,
+  UpdateInstallResult,
+  UpdateView,
 } from './dto';
 import { RENT_KINDS } from './rent';
 import { CACHE_TTLS, presetSchema } from './settings';
@@ -61,6 +63,10 @@ export const ipcInputs = {
   'app.status': none,
   'app.openReleases': none,
   'app.openHelp': none,
+  'update.state': none,
+  'update.check': none,
+  'update.download': none,
+  'update.install': none,
   'app.quitConfirmed': none,
   'app.firstCloseHintShown': none,
   'auth.reload': none,
@@ -139,6 +145,10 @@ export interface IpcOutputs {
   'app.status': StatusView;
   'app.openReleases': undefined;
   'app.openHelp': undefined;
+  'update.state': UpdateView;
+  'update.check': UpdateView;
+  'update.download': UpdateView;
+  'update.install': UpdateInstallResult;
   'app.quitConfirmed': undefined;
   'app.firstCloseHintShown': undefined;
   'auth.reload': StatusView;

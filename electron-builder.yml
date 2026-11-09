@@ -22,6 +22,11 @@ asarUnpack:
   - out/main/dbWorker.js
   - out/main/chunks/**
 npmRebuild: false
+publish:
+  - provider: github
+    owner: CamarilloG
+    repo: 5e-jewelry-helper
+    releaseType: release
 protocols:
   - name: 饰品驿站助手通知
     schemes:

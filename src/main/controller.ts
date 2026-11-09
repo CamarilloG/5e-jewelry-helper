@@ -56,6 +56,7 @@ import { MonitorService } from './services/monitor-service';
 import { NotificationService, type Notifier } from './services/notification-service';
 import { computeQuote, quoteView } from './services/quote';
 import { ScanService } from './services/scan-service';
+import { type UpdaterDriver, UpdateService } from './services/update-service';
 import { summarize, toAccountView, toItemView } from './services/views';
 import type { DbClient } from './storage/client';
 
@@ -69,6 +70,8 @@ export interface ShellBridge {
   saveDiagnostics(defaultName: string, content: string): Promise<string | null>;
   confirmQuit(): void;
   showWindow(): void;
+  /** 走完退出清理后启动安装器 */
+  installUpdate?(): void;
 }
 
 export interface ControllerDeps {
@@ -83,6 +86,8 @@ export interface ControllerDeps {
   loadPaymentImage: (url: string) => Promise<string | null>;
   appVersion: string;
   readLogs?: () => Promise<string>;
+  /** 没有更新器（开发环境）时为 null */
+  updater?: UpdaterDriver | null;
   now?: () => number;
   mono?: () => number;
 }
@@ -100,6 +105,7 @@ export class AppController {
   readonly monitor: MonitorService;
   readonly notifications: NotificationService;
   readonly checkout: CheckoutService;
+  readonly update: UpdateService;
   private device: DeviceSettings = deviceSettingsSchema.parse({});
   private profileSettings: ProfileSettings | null = null;
   private lastProfileId: string | null = null;
@@ -195,6 +201,14 @@ export class AppController {
       logger,
       now: this.now,
     });
+    this.update = new UpdateService({
+      driver: deps.updater ?? null,
+      currentVersion: deps.appVersion,
+      isBusy: () => this.checkout.busy(),
+      requestInstall: () => deps.shell.installUpdate?.(),
+      onChange: (payload) => this.emit({ type: 'update', payload }),
+      logger,
+    });
     this.checkout = new CheckoutService({
       api: this.api,
       db: deps.db,
@@ -276,6 +290,7 @@ export class AppController {
   async start() {
     if (this.started) return;
     this.started = true;
+    this.update.scheduleStartupCheck();
     if (this.deps.dbError) {
       this.queue.pause('数据库不可用');
       this.emitStatus();
@@ -364,6 +379,7 @@ export class AppController {
 
   async shutdown() {
     this.shuttingDown = true;
+    this.update.stop();
     if (this.statusTimer) {
       clearTimeout(this.statusTimer);
       this.statusTimer = null;
@@ -803,6 +819,10 @@ export class AppController {
       'app.openHelp': async () => {
         await this.deps.shell.openExternal(HELP_URL);
       },
+      'update.state': () => this.update.view(),
+      'update.check': () => this.update.check(true),
+      'update.download': () => this.update.download(),
+      'update.install': () => this.update.install(),
       'app.quitConfirmed': async () => {
         this.deps.shell.confirmQuit();
       },

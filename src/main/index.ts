@@ -33,9 +33,11 @@ import {
   loadPaymentImage,
   trayImage,
 } from './electron/shell';
+import { createElectronUpdater } from './electron/updater';
 import { FileLogger } from './logger';
 import { resolvePaths } from './paths';
 import { ImageCache } from './services/image-cache';
+import type { UpdaterDriver } from './services/update-service';
 import { type DbClient, DbError, WorkerDbClient } from './storage/client';
 
 export const APP_ID = 'io.github.camarillog.jewelryhelper';
@@ -125,6 +127,7 @@ async function boot() {
   }
 
   if (app.isPackaged) ensureRegistration();
+  const updater: UpdaterDriver | null = app.isPackaged ? createElectronUpdater() : null;
 
   controller = new AppController({
     db,
@@ -142,6 +145,7 @@ async function boot() {
     images,
     loadPaymentImage,
     appVersion: app.getVersion(),
+    updater,
     readLogs: async () => readRecentLogs(paths.logDir),
     shell: {
       openExternal: async (url) => {
@@ -166,6 +170,7 @@ async function boot() {
         return result.filePath;
       },
       confirmQuit: () => void doQuit(),
+      installUpdate: () => void doQuit(() => updater?.quitAndInstall()),
       showWindow: () => focusWindow(mainWindow),
     },
   });
@@ -355,7 +360,7 @@ function requestQuit() {
   void doQuit();
 }
 
-async function doQuit() {
+async function doQuit(afterShutdown?: () => void) {
   if (quitInProgress) return;
   quitInProgress = true;
   try {
@@ -373,6 +378,12 @@ async function doQuit() {
     tray.destroy();
   }
   tray = null;
+  if (afterShutdown) {
+    afterShutdown();
+    // 服务已停止；安装器启动失败时不留下没有窗口的进程
+    setTimeout(() => app.exit(0), 8000);
+    return;
+  }
   app.quit();
 }
 
