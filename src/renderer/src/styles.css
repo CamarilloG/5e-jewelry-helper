@@ -1044,6 +1044,17 @@ body.jh-resizing .jh-drawer-handle {
 .jh-path {
   word-break: break-all;
 }
+.jh-update-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.jh-update-notes {
+  white-space: pre-wrap;
+  max-height: 320px;
+  overflow-y: auto;
+}
 .jh-tombstones {
   display: flex;
   flex-direction: column;

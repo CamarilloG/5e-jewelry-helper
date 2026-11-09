@@ -6,6 +6,7 @@ import { call, isIpcError, on } from './api';
 import { CheckoutModal } from './components/CheckoutModal';
 import { DetailDrawer } from './components/DetailDrawer';
 import { PresetEditor } from './components/PresetEditor';
+import { UpdateBanner } from './components/UpdateControls';
 import { formatCountdown } from './format';
 import { FavoritesPage } from './pages/FavoritesPage';
 import { FilterPage } from './pages/FilterPage';
@@ -25,6 +26,7 @@ function useMainEvents() {
   useEffect(() => {
     const offs = [
       on('status', (status) => useUi.setState({ status })),
+      on('update', (update) => useUi.setState({ update })),
       on('scan', (scan) => useUi.setState({ scan })),
       on('favorites', (favorites) => useUi.setState({ favorites })),
       on('checkout', (checkout) => {
@@ -87,6 +89,7 @@ function useMainEvents() {
     };
     window.addEventListener('unhandledrejection', onRejection);
     void call('app.status').then((status) => useUi.setState({ status }));
+    void call('update.state').then((update) => useUi.setState({ update }));
     void call('scan.state').then((scan) => useUi.setState({ scan }));
     void call('favorites.state').then((favorites) => useUi.setState({ favorites }));
     void call('checkout.state').then((checkout) => useUi.setState({ checkout }));
@@ -138,6 +141,7 @@ export function Shell() {
         ))}
       </nav>
       <main className="jh-main">
+        <UpdateBanner />
         <Banners />
         <div className="jh-main-content">
           {status?.dbError ? (

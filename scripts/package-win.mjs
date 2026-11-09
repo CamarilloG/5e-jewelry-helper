@@ -19,7 +19,7 @@ run('npx', ['electron-builder', '--win', 'nsis', '--x64', '--publish', 'never'])
 const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 const dir = path.join(root, 'release', version);
 const lines = [];
-for (const f of fs.readdirSync(dir).filter((f) => /\.(exe|blockmap)$/.test(f))) {
+for (const f of fs.readdirSync(dir).filter((f) => /\.(exe|blockmap)$|^latest\.yml$/.test(f))) {
   const hash = createHash('sha256')
     .update(fs.readFileSync(path.join(dir, f)))
     .digest('hex');
